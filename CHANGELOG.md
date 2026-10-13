@@ -2,6 +2,18 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.3.0] - 2026-10-13
+
+### Aggiunto
+- In fondo alla barra compaiono il modello in uso (arancio), l'email dell'account (azzurra) e la versione di Claude Code (verde acqua).
+- Layout adattivo: su un terminale stretto la barra va su due righe, consumi sopra e ambiente sotto, così la coda non viene tagliata.
+- L'email si legge dal blocco `userEmail` del contesto del primo messaggio; all'avvio del mod il contesto viene fatto ricalcolare perché l'email compaia anche a sessione già avviata.
+
+### Modificato
+- L'illustrazione `docs/usage-band.png` mostra le due righe con modello, email di esempio e versione.
+
+![La barra sopra il prompt, con uso normale e vicino ai limiti](docs/usage-band.png)
+
 ## [0.2.0] - 2026-10-13
 
 ### Modificato

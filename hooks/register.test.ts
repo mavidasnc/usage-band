@@ -20,12 +20,19 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   // Il motore sotto i plugin: nessun dato all'avvio, la misura viene dal test
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('session.version', () => ({ value: { version: '2.1.296' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
 
   await $.session.start(START)
   await $.session.measure(MEASURE)
+  // Il blocco userEmail come lo scrive il motore
+  await $.prompt.context({
+    blocks: [{ name: 'userEmail', text: "The user's email address is maurizio@mavida.com. Use it only to identify the user." }],
+  } as never)
 
   const ui = await $.ui.mount({
     plugin: 'usage-band',
@@ -41,17 +48,27 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   expect(await ui.find({ text: /↻ \d{2}:\d{2}/ })).toBeDefined()
   // Cartella padre e cartella di lavoro, in giallo
   expect(await ui.find({ text: 'Claude\\mio-progetto' })).toBeDefined()
+  // Modello corrente ed email dell'account, ognuno col suo colore
+  expect(await ui.find({ text: 'opus' })).toBeDefined()
+  expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
+  // Versione di Claude Code in fondo
+  expect(await ui.find({ text: 'v2.1.296' })).toBeDefined()
 
   // I tre colori per soglia compaiono nell'albero disegnato
   const tree = JSON.stringify(await ui.drawn())
   expect(tree).toContain('"warning"')
   expect(tree).toContain('"success"')
   expect(tree).toContain('"error"')
+  expect(tree).toContain('"claude"')
+  expect(tree).toContain('"suggestion"')
+  expect(tree).toContain('"planMode"')
 })
 
 test('senza alcun dato la barra resta visibile con n/d', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('session.version', () => ({ value: { version: '2.1.296' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   await $.session.start(START)
@@ -70,6 +87,8 @@ test('senza alcun dato la barra resta visibile con n/d', async ($, on) => {
 test('/usage-band nasconde e rimostra la barra', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('session.version', () => ({ value: { version: '2.1.296' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
@@ -91,4 +110,32 @@ test('/usage-band nasconde e rimostra la barra', async ($, on) => {
   // Secondo giro: rimostra
   expect((await run()).text).toMatch(/visibile/)
   expect(await (await draw()).find({ text: /5h/ })).toBeDefined()
+})
+
+test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righe', async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('session.version', () => ({ value: { version: '2.1.296' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+
+  await $.session.start(START)
+
+  const draw = async (columns: number) =>
+    JSON.stringify(
+      await (
+        await $.ui.mount({
+          plugin: 'usage-band',
+          surface: 'terminal',
+          component: 'AbovePrompt',
+          props: PROPS,
+          viewport: { columns, rows: 24 },
+        })
+      ).drawn(),
+    )
+
+  // Stretto: la colonna di due righe è un Box; largo: solo Text annidati
+  expect(await draw(60)).toContain('"Box"')
+  expect(await draw(250)).not.toContain('"Box"')
 })

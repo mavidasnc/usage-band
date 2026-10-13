@@ -9,6 +9,12 @@ const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
 // True quando la barra è nascosta con /usage-band
 const isHidden = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
 
+// Email dell'account corrente, nota solo dopo il primo prompt della conversazione
+const email = atom({ plugin: 'usage-band', key: 'email' } as const, null)
+
+// Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset)
+const USAGE_ROW_WIDTH = 90
+
 // Larghezza delle barre grafiche, in blocchi
 const BAR_WIDTH = 10
 
@@ -60,6 +66,9 @@ export const register: Register = on => {
       description: 'Mostra o nasconde la barra di uso sopra il prompt',
     })
     const result = await next(e)
+    // Fa ricalcolare il contesto al prossimo prompt: il blocco userEmail passa dal hook prompt.context
+    // anche quando il mod viene caricato a sessione già avviata
+    $.ui.invalidate('prompt.context')
     const usage = await $.session.usage()
     await update($, snapshot, () => toSnapshot(usage.context, usage.rateLimits))
 
@@ -71,6 +80,19 @@ export const register: Register = on => {
     await update($, snapshot, () => toSnapshot(e.context, e.rateLimits))
 
     return next(e)
+  })
+
+  // L'email dell'account viaggia nel blocco userEmail del contesto del primo messaggio: la legge senza modificarlo
+  on('prompt.context', async ($, e, next) => {
+    const result = await next(e)
+    const block = result.blocks.find(b => b.name === 'userEmail')
+    const found = block?.text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/)?.[0]
+
+    if (found) {
+      await update($, email, () => found)
+    }
+
+    return result
   })
 
   // /usage-band: alterna barra visibile e nascosta
@@ -90,7 +112,10 @@ export const register: Register = on => {
 
     const data = await read($, snapshot)
     const folder = folderLabel(await $.session.cwd())
-    const { Text } = $.ui.resolve(e)
+    const model = await $.session.model()
+    const { version } = await $.session.version()
+    const account = await read($, email)
+    const { Box, Text } = $.ui.resolve(e)
 
     // Un segmento: etichetta, barra e percentuale colorate, reset opzionale
     const segment = (label: string, percent?: number, resetsAt?: string) =>
@@ -106,16 +131,45 @@ export const register: Register = on => {
         </Text>
       )
 
-    return (
+    // Riga dei consumi: 5h, 7g e contesto
+    const usageRow = (
       <Text>
         {segment('5h', data?.fiveHour?.percent, data?.fiveHour?.resetsAt)}
         <Text dimColor> │ </Text>
         {segment('7g', data?.sevenDay?.percent, data?.sevenDay?.resetsAt)}
         <Text dimColor> │ </Text>
         {segment('ctx', data?.context)}
-        <Text dimColor> │ </Text>
-        <Text color="warning">{folder}</Text>
       </Text>
+    )
+
+    // Riga dell'ambiente: cartella (gialla), modello (arancio), email se nota (azzurra) e versione di Claude Code (verde acqua)
+    const envRow = (
+      <Text>
+        <Text color="warning">{folder}</Text>
+        <Text dimColor> │ </Text>
+        <Text color="claude">{model}</Text>
+        {account ? <Text dimColor> │ </Text> : null}
+        {account ? <Text color="suggestion">{account}</Text> : null}
+        <Text dimColor> │ </Text>
+        <Text color="planMode">v{version}</Text>
+      </Text>
+    )
+
+    // Tutto su una riga se c'è posto, altrimenti due righe: una riga troppo lunga andrebbe a capo e si perderebbe la coda
+    const envLength = [folder, model, account, `v${version}`].filter(Boolean).join(' │ ').length
+    const isWide = USAGE_ROW_WIDTH + 3 + envLength <= (e.viewport?.columns ?? 0)
+
+    return isWide ? (
+      <Text>
+        {usageRow}
+        <Text dimColor> │ </Text>
+        {envRow}
+      </Text>
+    ) : (
+      <Box flexDirection="column">
+        {usageRow}
+        {envRow}
+      </Box>
     )
   })
 }
