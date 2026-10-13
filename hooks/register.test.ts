@@ -21,19 +21,14 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
-  on('session.version', () => ({ value: { version: '2.1.296' } }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('prompt.context', (_$, e) => ({ blocks: e.blocks }))
 
   await $.session.start(START)
   await $.session.measure(MEASURE)
-  // Il blocco userEmail come lo scrive il motore
-  await $.prompt.context({
-    blocks: [{ name: 'userEmail', text: "The user's email address is maurizio@mavida.com. Use it only to identify the user." }],
-  } as never)
-
   const ui = await $.ui.mount({
     plugin: 'usage-band',
     surface: 'terminal',
@@ -51,8 +46,8 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   // Modello corrente ed email dell'account, ognuno col suo colore
   expect(await ui.find({ text: 'opus' })).toBeDefined()
   expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
-  // Versione di Claude Code in fondo
-  expect(await ui.find({ text: 'v2.1.296' })).toBeDefined()
+  // Versione del mod in fondo, letta dal suo plugin.json
+  expect(await ui.find({ text: 'usage-band v9.9.9' })).toBeDefined()
 
   // I tre colori per soglia compaiono nell'albero disegnato
   const tree = JSON.stringify(await ui.drawn())
@@ -68,7 +63,8 @@ test('senza alcun dato la barra resta visibile con n/d', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
-  on('session.version', () => ({ value: { version: '2.1.296' } }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   await $.session.start(START)
@@ -88,7 +84,8 @@ test('/usage-band nasconde e rimostra la barra', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
-  on('session.version', () => ({ value: { version: '2.1.296' } }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
@@ -116,7 +113,8 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
-  on('session.version', () => ({ value: { version: '2.1.296' } }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
 

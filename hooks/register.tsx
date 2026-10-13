@@ -9,8 +9,11 @@ const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
 // True quando la barra è nascosta con /usage-band
 const isHidden = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
 
-// Email dell'account corrente, nota solo dopo il primo prompt della conversazione
+// Email dell'account corrente, nota quando `claude auth status` risponde
 const email = atom({ plugin: 'usage-band', key: 'email' } as const, null)
+
+// Versione del mod, letta dal suo plugin.json all'avvio
+const version = atom({ plugin: 'usage-band', key: 'version' } as const, null)
 
 // Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset)
 const USAGE_ROW_WIDTH = 90
@@ -66,11 +69,26 @@ export const register: Register = on => {
       description: 'Mostra o nasconde la barra di uso sopra il prompt',
     })
     const result = await next(e)
-    // Fa ricalcolare il contesto al prossimo prompt: il blocco userEmail passa dal hook prompt.context
-    // anche quando il mod viene caricato a sessione già avviata
-    $.ui.invalidate('prompt.context')
     const usage = await $.session.usage()
     await update($, snapshot, () => toSnapshot(usage.context, usage.rateLimits))
+
+    // Versione del mod, dal suo plugin.json (il file è del plugin, quindi leggibile)
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+    await update($, version, () => manifest.version ?? null)
+
+    // Email dell'account da `claude auth status`, senza bloccare l'avvio; se il comando non c'è
+    // o fallisce resta il ripiego del hook prompt.context
+    void (async () => {
+      try {
+        const { stdout } = await $.process.run(['claude', 'auth', 'status'])
+        const found = JSON.parse(stdout).email
+        if (found) {
+          await update($, email, () => found)
+        }
+      } catch {
+        // nessun comando claude nel PATH o output non JSON: l'email resta non nota
+      }
+    })()
 
     return result
   })
@@ -113,7 +131,7 @@ export const register: Register = on => {
     const data = await read($, snapshot)
     const folder = folderLabel(await $.session.cwd())
     const model = await $.session.model()
-    const { version } = await $.session.version()
+    const modVersion = await read($, version)
     const account = await read($, email)
     const { Box, Text } = $.ui.resolve(e)
 
@@ -142,7 +160,8 @@ export const register: Register = on => {
       </Text>
     )
 
-    // Riga dell'ambiente: cartella (gialla), modello (arancio), email se nota (azzurra) e versione di Claude Code (verde acqua)
+    // Riga dell'ambiente: cartella (gialla), modello (arancio), email (azzurra) e versione del mod (verde acqua);
+    // email e versione compaiono quando sono note
     const envRow = (
       <Text>
         <Text color="warning">{folder}</Text>
@@ -150,13 +169,15 @@ export const register: Register = on => {
         <Text color="claude">{model}</Text>
         {account ? <Text dimColor> │ </Text> : null}
         {account ? <Text color="suggestion">{account}</Text> : null}
-        <Text dimColor> │ </Text>
-        <Text color="planMode">v{version}</Text>
+        {modVersion ? <Text dimColor> │ </Text> : null}
+        {modVersion ? <Text color="planMode">usage-band v{modVersion}</Text> : null}
       </Text>
     )
 
     // Tutto su una riga se c'è posto, altrimenti due righe: una riga troppo lunga andrebbe a capo e si perderebbe la coda
-    const envLength = [folder, model, account, `v${version}`].filter(Boolean).join(' │ ').length
+    const envLength = [folder, model, account, modVersion && `usage-band v${modVersion}`]
+      .filter(Boolean)
+      .join(' │ ').length
     const isWide = USAGE_ROW_WIDTH + 3 + envLength <= (e.viewport?.columns ?? 0)
 
     return isWide ? (

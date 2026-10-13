@@ -11,9 +11,9 @@ L'immagine è un'illustrazione con valori di esempio.
 - **ctx**: percentuale di riempimento della finestra di contesto della conversazione.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
 - **modello**: il modello in uso, come lo mostra `/model`, in arancio.
-- **email**: l'account corrente, in azzurro. Compare dopo il primo prompt della conversazione,
-  perché il motore la fornisce nel contesto del primo messaggio.
-- **versione**: versione di Claude Code, in verde acqua.
+- **email**: l'account corrente, in azzurro, ricavata all'avvio con `claude auth status`
+  (serve `claude` nel `PATH`; altrimenti compare dopo il primo prompt, dal contesto del messaggio).
+- **versione**: versione del mod (`usage-band vX.Y.Z`), in verde acqua.
 
 I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90%.
 Una voce senza dato mostra `n/d`.

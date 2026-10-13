@@ -2,6 +2,15 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.4.0] - 2026-10-13
+
+### Modificato
+- In fondo alla barra la versione mostrata è quella del mod (`usage-band v0.4.0`, letta dal suo `plugin.json`) al posto di quella di Claude Code.
+- L'email dell'account si ricava all'avvio con `claude auth status`, senza bloccare l'avvio; il blocco `userEmail` del contesto resta come ripiego. Non si forza più il ricalcolo del contesto.
+- L'illustrazione `docs/usage-band.png` mostra la versione del mod.
+
+![La barra sopra il prompt, con uso normale e vicino ai limiti](docs/usage-band.png)
+
 ## [0.3.0] - 2026-10-13
 
 ### Aggiunto
