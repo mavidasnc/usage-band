@@ -137,3 +137,39 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
   expect(await draw(60)).toContain('"Box"')
   expect(await draw(250)).not.toContain('"Box"')
 })
+
+test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  // Il motore sotto turn.step: nessun chunk, risposta con turno e indice della richiesta
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never
+  })
+
+  await $.session.start(START)
+
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  // Prima di una richiesta l'effort non è noto: non compare
+  expect(await (await mount()).find({ text: /effort/ })).toBeUndefined()
+
+  // Una richiesta del loop principale con effort high: compare, tra modello ed email
+  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'opus', effort: 'high', messageCount: 1 } as never)
+  for await (const _chunk of stream) {
+    // nessun chunk atteso
+  }
+  expect(await (await mount()).find({ text: 'effort high' })).toBeDefined()
+
+  // Una richiesta di un subagente non cambia l'effort mostrato
+  const sub = $.turn.step({ turnId: 't2', index: 0, model: 'haiku', effort: 'low', messageCount: 1, agentId: 'a1' } as never)
+  for await (const _chunk of sub) {
+    // nessun chunk atteso
+  }
+  expect(await (await mount()).find({ text: 'effort high' })).toBeDefined()
+})

@@ -6,6 +6,6 @@ export type Snapshot = { context?: number; fiveHour?: Limit; sevenDay?: Limit }
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-band': { snapshot: Snapshot | null; isHidden: boolean; email: string | null; version: string | null }
+    'usage-band': { snapshot: Snapshot | null; isHidden: boolean; email: string | null; version: string | null; effort: string | number | null }
   }
 }

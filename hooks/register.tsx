@@ -15,6 +15,9 @@ const email = atom({ plugin: 'usage-band', key: 'email' } as const, null)
 // Versione del mod, letta dal suo plugin.json all'avvio
 const version = atom({ plugin: 'usage-band', key: 'version' } as const, null)
 
+// Effort dell'ultima richiesta al modello (low, medium, high, xhigh, max o un numero), noto dopo il primo prompt
+const effort = atom({ plugin: 'usage-band', key: 'effort' } as const, null)
+
 // Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset)
 const USAGE_ROW_WIDTH = 90
 
@@ -100,6 +103,15 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Ogni richiesta al modello porta l'effort in uso: lo registra per il loop principale e lascia passare tutto
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) {
+      await update($, effort, () => e.effort ?? null)
+    }
+
+    return yield* next(e)
+  })
+
   // L'email dell'account viaggia nel blocco userEmail del contesto del primo messaggio: la legge senza modificarlo
   on('prompt.context', async ($, e, next) => {
     const result = await next(e)
@@ -132,6 +144,7 @@ export const register: Register = on => {
     const folder = folderLabel(await $.session.cwd())
     const model = await $.session.model()
     const modVersion = await read($, version)
+    const level = await read($, effort)
     const account = await read($, email)
     const { Box, Text } = $.ui.resolve(e)
 
@@ -160,13 +173,15 @@ export const register: Register = on => {
       </Text>
     )
 
-    // Riga dell'ambiente: cartella (gialla), modello (arancio), email (azzurra) e versione del mod (verde acqua);
-    // email e versione compaiono quando sono note
+    // Riga dell'ambiente: cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione del mod (verde acqua);
+    // effort, email e versione compaiono quando sono noti
     const envRow = (
       <Text>
         <Text color="warning">{folder}</Text>
         <Text dimColor> │ </Text>
         <Text color="claude">{model}</Text>
+        {level !== null ? <Text dimColor> │ </Text> : null}
+        {level !== null ? <Text color="autoAccept">effort {level}</Text> : null}
         {account ? <Text dimColor> │ </Text> : null}
         {account ? <Text color="suggestion">{account}</Text> : null}
         {modVersion ? <Text dimColor> │ </Text> : null}
@@ -175,7 +190,7 @@ export const register: Register = on => {
     )
 
     // Tutto su una riga se c'è posto, altrimenti due righe: una riga troppo lunga andrebbe a capo e si perderebbe la coda
-    const envLength = [folder, model, account, modVersion && `usage-band v${modVersion}`]
+    const envLength = [folder, model, level !== null && `effort ${level}`, account, modVersion && `usage-band v${modVersion}`]
       .filter(Boolean)
       .join(' │ ').length
     const isWide = USAGE_ROW_WIDTH + 3 + envLength <= (e.viewport?.columns ?? 0)

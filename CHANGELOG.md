@@ -2,6 +2,16 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.5.0] - 2026-10-13
+
+### Aggiunto
+- Dopo il modello compare l'effort in uso (`effort high`, in viola), prima dell'email. Si legge dalle richieste del loop principale (evento `turn.step`), quindi è noto dopo il primo prompt e non cambia per le richieste dei subagenti. Con un modello senza effort la voce non compare.
+
+### Modificato
+- L'illustrazione `docs/usage-band.png` mostra l'effort e la versione 0.5.0.
+
+![La barra sopra il prompt, con uso normale e vicino ai limiti](docs/usage-band.png)
+
 ## [0.4.0] - 2026-10-13
 
 ### Modificato
