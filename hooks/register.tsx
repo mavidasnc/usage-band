@@ -34,6 +34,14 @@ const resetLabel = (iso: string) => {
   return isToday ? time : `${DAYS[date.getDay()]} ${time}`
 }
 
+// Cartella di lavoro con la sua cartella padre (es. projects\usage-band), separatore preso dal percorso
+const folderLabel = (path: string) => {
+  const separator = path.includes('\\') ? '\\' : '/'
+  const parts = path.split(/[\\/]/).filter(Boolean)
+
+  return parts.length ? parts.slice(-2).join(separator) : path
+}
+
 // Ricava dai dati del motore le tre percentuali che la barra mostra
 const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]): Snapshot => {
   const pick = (kind: string): Limit | undefined => {
@@ -75,14 +83,13 @@ export const register: Register = on => {
 
   // La barra sopra il prompt
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const data = await read($, snapshot)
-    const hasData = data && (data.context !== undefined || data.fiveHour || data.sevenDay)
-
-    // Nascosta, niente dati o sondaggio in corso: cede il posto
-    if (e.props.hasSurvey || !hasData || (await read($, isHidden))) {
+    // Nascosta con /usage-band o sondaggio in corso: cede il posto (senza dati resta visibile con n/d)
+    if (e.props.hasSurvey || (await read($, isHidden))) {
       return next(e)
     }
 
+    const data = await read($, snapshot)
+    const folder = folderLabel(await $.session.cwd())
     const { Text } = $.ui.resolve(e)
 
     // Un segmento: etichetta, barra e percentuale colorate, reset opzionale
@@ -95,17 +102,19 @@ export const register: Register = on => {
           <Text color={colorFor(percent)}>
             {gauge(percent)} {Math.round(percent)}%
           </Text>
-          {resetsAt ? <Text dimColor> ↻{resetLabel(resetsAt)}</Text> : null}
+          {resetsAt ? <Text dimColor> ↻ {resetLabel(resetsAt)}</Text> : null}
         </Text>
       )
 
     return (
       <Text>
-        {segment('5h', data.fiveHour?.percent, data.fiveHour?.resetsAt)}
+        {segment('5h', data?.fiveHour?.percent, data?.fiveHour?.resetsAt)}
         <Text dimColor> │ </Text>
-        {segment('7g', data.sevenDay?.percent, data.sevenDay?.resetsAt)}
+        {segment('7g', data?.sevenDay?.percent, data?.sevenDay?.resetsAt)}
         <Text dimColor> │ </Text>
-        {segment('ctx', data.context)}
+        {segment('ctx', data?.context)}
+        <Text dimColor> │ </Text>
+        <Text color="warning">{folder}</Text>
       </Text>
     )
   })

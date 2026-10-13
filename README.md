@@ -1,28 +1,29 @@
 # usage-band
 
-Mod per Claude Code che disegna una barra sopra il prompt con tre indicatori:
+Mod per Claude Code che disegna una barra sopra il prompt con tre indicatori e la cartella di lavoro:
 
-```
-5h ███████░░░ 68% ↻14:30 │ 7g ███░░░░░░░ 31% ↻lun 09:00 │ ctx █████░░░░░ 47%
-```
+![La barra sopra il prompt, con uso normale e vicino ai limiti](docs/usage-band.png)
+
+L'immagine è un'illustrazione con valori di esempio.
 
 - **5h**: percentuale usata della finestra di limite a 5 ore, con orario di reset.
 - **7g**: percentuale usata del limite settimanale, con giorno e orario di reset.
 - **ctx**: percentuale di riempimento della finestra di contesto della conversazione.
+- **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
 
 I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90%.
-Una voce senza dato mostra `n/d`; senza alcun dato la barra non compare.
+Una voce senza dato mostra `n/d`.
+La barra è sempre visibile e cede il posto solo ai sondaggi di Claude Code.
 I limiti 5h e settimanale esistono solo con un abbonamento Claude (Pro, Max, Team).
 
 ## Comandi
 
-- `/usage-band`: nasconde la barra, un secondo invio la rimostra.
+- `/usage-band`: nasconde la barra per la sessione corrente, un secondo invio la rimostra.
+  Ogni nuova sessione riparte con la barra visibile.
 
 ## Installazione
 
 Serve Claude Code 2.1.275 o successivo, da terminale (non nella tab Code dell'app desktop).
-Il repository è privato: bisogna avere accesso a `mavidasnc` su GitHub e le credenziali git
-configurate (per esempio con `gh auth login`).
 
 ```
 /plugin install usage-band --marketplace mavidasnc/usage-band

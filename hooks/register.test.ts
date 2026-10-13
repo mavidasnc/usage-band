@@ -10,7 +10,7 @@ const START = { cwd: '', surface: 'terminal', isInteractive: true } as never
 const MEASURE = {
   context: { window: 200000, percent: 92 },
   rateLimits: [
-    { kind: 'five_hour', percentUsed: 75 },
+    { kind: 'five_hour', percentUsed: 75, resetsAt: '2026-10-13T14:30:00+02:00' },
     { kind: 'seven_day', percentUsed: 31 },
   ],
   changed: ['context', 'rateLimits'],
@@ -19,6 +19,7 @@ const MEASURE = {
 test('la barra mostra le tre percentuali con i colori per soglia', async ($, on) => {
   // Il motore sotto i plugin: nessun dato all'avvio, la misura viene dal test
   on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
@@ -36,6 +37,10 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   expect(await ui.find({ text: /5h .* 75%/ })).toBeDefined()
   expect(await ui.find({ text: /7g .* 31%/ })).toBeDefined()
   expect(await ui.find({ text: /ctx .* 92%/ })).toBeDefined()
+  // Uno spazio tra il simbolo di reset e l'orario
+  expect(await ui.find({ text: /↻ \d{2}:\d{2}/ })).toBeDefined()
+  // Cartella padre e cartella di lavoro, in giallo
+  expect(await ui.find({ text: 'Claude\\mio-progetto' })).toBeDefined()
 
   // I tre colori per soglia compaiono nell'albero disegnato
   const tree = JSON.stringify(await ui.drawn())
@@ -44,13 +49,11 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   expect(tree).toContain('"error"')
 })
 
-test('senza alcun dato la barra non disegna nulla', async ($, on) => {
+test('senza alcun dato la barra resta visibile con n/d', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
-  // Il motore sotto la band: se il plugin cede il posto, disegna un Text vuoto
-  on('ui.render', () => ({ type: 'Text', props: {}, children: [] }) as never)
-
   await $.session.start(START)
 
   const ui = await $.ui.mount({
@@ -60,11 +63,13 @@ test('senza alcun dato la barra non disegna nulla', async ($, on) => {
     props: PROPS,
   })
 
-  expect(await ui.find({ text: /5h|7g|ctx/ })).toBeUndefined()
+  expect(await ui.find({ text: /5h n\/d/ })).toBeDefined()
+  expect(await ui.find({ text: /ctx n\/d/ })).toBeDefined()
 })
 
 test('/usage-band nasconde e rimostra la barra', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
