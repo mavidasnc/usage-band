@@ -1,0 +1,13 @@
+{
+  "name": "mavida-mods",
+  "owner": {
+    "name": "Maurizio Pelizzone"
+  },
+  "plugins": [
+    {
+      "name": "usage-band",
+      "source": "./"
+    }
+  ],
+  "description": "Mod di Claude Code sviluppati da Mavida"
+}
