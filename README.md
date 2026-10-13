@@ -12,7 +12,7 @@ L'immagine è un'illustrazione con valori di esempio.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
 - **modello**: il modello in uso, come lo mostra `/model`, in arancio.
 - **effort**: l'effort in uso (`low`, `medium`, `high`, `xhigh`, `max`), in viola. Compare dopo il primo prompt
-  e solo per i modelli che hanno un effort.
+  (dalle richieste al modello e, a fine turno, dall'evento `Stop`) e solo per i modelli che hanno un effort.
 - **email**: l'account corrente, in azzurro, ricavata all'avvio con `claude auth status`
   (serve `claude` nel `PATH`; altrimenti compare dopo il primo prompt, dal contesto del messaggio).
 - **versione**: versione del mod (`usage-band vX.Y.Z`), in verde acqua.

@@ -173,3 +173,27 @@ test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => 
   }
   expect(await (await mount()).find({ text: 'effort high' })).toBeDefined()
 })
+
+test("l'effort arriva anche dall'evento classico Stop, escluso quello dei subagenti", async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('classic.Stop', () => ({}))
+
+  await $.session.start(START)
+
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  // Un Stop del thread principale con effort xhigh: compare
+  await $.classic.Stop({ stop_hook_active: false, effort: { level: 'xhigh' } } as never)
+  expect(await (await mount()).find({ text: 'effort xhigh' })).toBeDefined()
+
+  // Un Stop di un subagente non lo cambia
+  await $.classic.Stop({ stop_hook_active: false, agent_id: 'a1', effort: { level: 'low' } } as never)
+  expect(await (await mount()).find({ text: 'effort xhigh' })).toBeDefined()
+})

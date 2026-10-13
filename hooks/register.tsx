@@ -112,6 +112,16 @@ export const register: Register = on => {
     return yield* next(e)
   })
 
+  // A fine turno l'evento classico Stop porta l'effort applicato (effort.level): seconda fonte,
+  // per quando turn.step non lo riporta; i turni dei subagenti (agent_id) non contano
+  on('classic.Stop', async ($, e, next) => {
+    if (e.agent_id === undefined && e.effort) {
+      await update($, effort, () => e.effort.level)
+    }
+
+    return next(e)
+  })
+
   // L'email dell'account viaggia nel blocco userEmail del contesto del primo messaggio: la legge senza modificarlo
   on('prompt.context', async ($, e, next) => {
     const result = await next(e)

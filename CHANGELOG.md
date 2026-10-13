@@ -2,6 +2,16 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.5.1] - 2026-10-13
+
+### Corretto
+- L'effort non compariva in una sessione reale: oltre a `turn.step`, ora si legge anche dall'evento classico `Stop`, che a fine turno porta l'effort applicato (`effort.level`). I turni dei subagenti non lo cambiano.
+
+### Modificato
+- L'illustrazione `docs/usage-band.png` mostra la versione 0.5.1.
+
+![La barra sopra il prompt, con uso normale e vicino ai limiti](docs/usage-band.png)
+
 ## [0.5.0] - 2026-10-13
 
 ### Aggiunto
