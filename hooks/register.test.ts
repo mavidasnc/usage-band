@@ -39,8 +39,8 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   expect(await ui.find({ text: /5h .* 75%/ })).toBeDefined()
   expect(await ui.find({ text: /7g .* 31%/ })).toBeDefined()
   expect(await ui.find({ text: /ctx .* 92%/ })).toBeDefined()
-  // Uno spazio tra il simbolo di reset e l'orario
-  expect(await ui.find({ text: /↻ \d{2}:\d{2}/ })).toBeDefined()
+  // Uno spazio tra il simbolo di reset e l'orario (preceduto dal giorno se il reset non è oggi)
+  expect(await ui.find({ text: /↻ (\p{L}{3} )?\d{2}:\d{2}/u })).toBeDefined()
   // Cartella padre e cartella di lavoro, in giallo
   expect(await ui.find({ text: 'Claude\\mio-progetto' })).toBeDefined()
   // Modello corrente ed email dell'account, ognuno col suo colore
@@ -48,6 +48,9 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
   // Versione del mod in fondo, letta dal suo plugin.json
   expect(await ui.find({ text: 'usage-band v9.9.9' })).toBeDefined()
+  // Separata dalla chat da una riga vuota e da una linea tenue
+  expect(await ui.find({ text: /^─+$/ })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).toContain('"marginTop":1')
 
   // I tre colori per soglia compaiono nell'albero disegnato
   const tree = JSON.stringify(await ui.drawn())
@@ -133,9 +136,10 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
       ).drawn(),
     )
 
-  // Stretto: la colonna di due righe è un Box; largo: solo Text annidati
-  expect(await draw(60)).toContain('"Box"')
-  expect(await draw(250)).not.toContain('"Box"')
+  // Il Box esterno tiene separatore e barra; stretto: un secondo Box per le due righe, largo: solo Text annidati
+  const boxes = (tree: string) => tree.split('"type":"Box"').length - 1
+  expect(boxes(await draw(60))).toBe(2)
+  expect(boxes(await draw(250))).toBe(1)
 })
 
 test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => {

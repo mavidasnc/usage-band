@@ -251,16 +251,24 @@ export const register: Register = on => {
       .join(' │ ').length
     const isWide = USAGE_ROW_WIDTH + 3 + envLength <= (e.viewport?.columns ?? 0)
 
-    return isWide ? (
-      <Text>
-        {usageRow}
-        <Text dimColor> │ </Text>
-        {envRow}
-      </Text>
-    ) : (
-      <Box flexDirection="column">
-        {usageRow}
-        {envRow}
+    // Separatore dalla chat: una riga vuota e una linea tenue larga quanto la band
+    const separator = <Text dimColor>{'─'.repeat(Math.max(e.props.bodyColumns ?? 0, 1))}</Text>
+
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        {separator}
+        {isWide ? (
+          <Text>
+            {usageRow}
+            <Text dimColor> │ </Text>
+            {envRow}
+          </Text>
+        ) : (
+          <Box flexDirection="column">
+            {usageRow}
+            {envRow}
+          </Box>
+        )}
       </Box>
     )
   })

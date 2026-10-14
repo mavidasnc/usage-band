@@ -2,6 +2,17 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.6.0] - 2026-10-14
+
+### Modificato
+- La barra è separata meglio dalla chat: sopra c'è una riga vuota e una linea tenue (`─`) larga quanto la barra.
+- L'illustrazione `docs/usage-band.png` mostra la linea separatrice e la versione 0.6.0.
+
+### Corretto
+- Il test dell'orario di reset falliva quando il reset di esempio non cadeva oggi: ora accetta anche il giorno davanti all'orario.
+
+![La barra sopra il prompt, con uso normale e vicino ai limiti](docs/usage-band.png)
+
 ## [0.5.2] - 2026-10-14
 
 ### Corretto
