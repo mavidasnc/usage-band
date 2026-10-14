@@ -2,6 +2,18 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.7.0] - 2026-10-14
+
+### Aggiunto
+- Subito dopo ctx, separato da una pipe, un pulsante cliccabile `[◂]` nasconde cartella, modello, effort, email e versione lasciando solo i consumi; `[▸]` li rimostra. Sta dopo il contesto, così non si sposta quando la riga dell'ambiente compare o sparisce. La scelta vale per la sessione e resta dopo `/clear`.
+
+### Modificato
+- Il modello compare col nome leggibile (`Opus 5.5`) invece dell'ID (`claude-opus-5-5`); gestisce anche gli ID datati, il vecchio schema (`claude-3-5-sonnet` → `Sonnet 3.5`), gli alias (`opus` → `Opus`) e il contesto esteso (`[1m]` → `(1M)`). Un ID non riconosciuto resta com'è.
+- L'effort mostra solo il livello (`high`), senza la parola `effort`.
+- L'illustrazione `docs/usage-band.png` mostra nome del modello, effort, pulsante, barra con dettagli nascosti e la versione 0.7.0.
+
+![La barra sopra il prompt, con uso normale, vicino ai limiti e con i dettagli nascosti](docs/usage-band.png)
+
 ## [0.6.0] - 2026-10-14
 
 ### Modificato

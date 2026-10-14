@@ -15,6 +15,9 @@ const email = atom({ plugin: 'usage-band', key: 'email' } as const, null)
 // Versione del mod, letta dal suo plugin.json all'avvio
 const version = atom({ plugin: 'usage-band', key: 'version' } as const, null)
 
+// True quando la barra mostra solo i consumi, senza cartella, modello, effort, email e versione
+const isCompact = atom({ plugin: 'usage-band', key: 'isCompact' } as const, false)
+
 // Effort dell'ultima richiesta al modello (low, medium, high, xhigh, max o un numero), noto dopo il primo prompt
 const effort = atom({ plugin: 'usage-band', key: 'effort' } as const, null)
 
@@ -54,6 +57,33 @@ const folderLabel = (path: string) => {
   return parts.length ? parts.slice(-2).join(separator) : path
 }
 
+// Nome leggibile del modello dal suo ID (claude-opus-5-5 → Opus 5.5, claude-3-5-sonnet-20241022 → Sonnet 3.5,
+// opus → Opus; il suffisso [1m] diventa (1M)); un ID che non segue questi schemi resta com'è
+const modelLabel = (id: string) => {
+  const window = id.match(/\[(\w+)\]$/)?.[1]
+  const suffix = window ? ` (${window.toUpperCase()})` : ''
+  const base = id.replace(/\[\w+\]$/, '').trim()
+  const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)
+  const name = base.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+
+  // Schema attuale: famiglia, poi versione (opus-5-5, haiku-4)
+  const current = name.match(/^([a-z]+)-(\d+(?:-\d+)?)$/)
+  if (current) {
+    return `${capitalize(current[1])} ${current[2].replace('-', '.')}${suffix}`
+  }
+  // Schema precedente: versione, poi famiglia (3-5-sonnet)
+  const legacy = name.match(/^(\d+(?:-\d+)?)-([a-z]+)$/)
+  if (legacy) {
+    return `${capitalize(legacy[2])} ${legacy[1].replace('-', '.')}${suffix}`
+  }
+  // Alias senza versione (opus, sonnet)
+  if (/^[a-z]+$/.test(name)) {
+    return `${capitalize(name)}${suffix}`
+  }
+
+  return id
+}
+
 // Ricava dai dati del motore le tre percentuali che la barra mostra
 const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]): Snapshot => {
   const pick = (kind: string): Limit | undefined => {
@@ -71,6 +101,9 @@ let lastLimits: Pick<Snapshot, 'fiveHour' | 'sevenDay'> = {}
 // Ultima email e versione note nel processo: stesso ripiego, letto dalla barra quando lo stato è vuoto
 let lastEmail: string | null = null
 let lastVersion: string | null = null
+
+// Ultima scelta del pulsante dei dettagli, con lo stesso ripiego dopo /clear
+let lastCompact = false
 
 // Riempie gli atom della sessione: misura corrente, versione del mod ed email dell'account.
 // Serve all'avvio e dopo /clear, che apre una sessione con lo stato vuoto senza rifare session.start
@@ -198,11 +231,12 @@ export const register: Register = on => {
       sevenDay: measured?.sevenDay ?? lastLimits.sevenDay,
     }
     const folder = folderLabel(await $.session.cwd())
-    const model = await $.session.model()
+    const model = modelLabel(await $.session.model())
     const modVersion = (await read($, version)) ?? lastVersion
     const level = await read($, effort)
     const account = (await read($, email)) ?? lastEmail
-    const { Box, Text } = $.ui.resolve(e)
+    const compact = (await read($, isCompact)) || lastCompact
+    const { Box, Button, Text } = $.ui.resolve(e)
 
     // Un segmento: etichetta, barra e percentuale colorate, reset opzionale
     const segment = (label: string, percent?: number, resetsAt?: string) =>
@@ -237,7 +271,7 @@ export const register: Register = on => {
         <Text dimColor> │ </Text>
         <Text color="claude">{model}</Text>
         {level !== null ? <Text dimColor> │ </Text> : null}
-        {level !== null ? <Text color="autoAccept">effort {level}</Text> : null}
+        {level !== null ? <Text color="autoAccept">{level}</Text> : null}
         {account ? <Text dimColor> │ </Text> : null}
         {account ? <Text color="suggestion">{account}</Text> : null}
         {modVersion ? <Text dimColor> │ </Text> : null}
@@ -245,11 +279,40 @@ export const register: Register = on => {
       </Text>
     )
 
-    // Tutto su una riga se c'è posto, altrimenti due righe: una riga troppo lunga andrebbe a capo e si perderebbe la coda
-    const envLength = [folder, model, level !== null && `effort ${level}`, account, modVersion && `usage-band v${modVersion}`]
-      .filter(Boolean)
-      .join(' │ ').length
-    const isWide = USAGE_ROW_WIDTH + 3 + envLength <= (e.viewport?.columns ?? 0)
+    // Pulsante subito dopo il contesto, così non si sposta: [▸] mostra i dettagli dell'ambiente, [◂] li nasconde lasciando solo i consumi.
+    // Plain con le parentesi nell'etichetta: senza plain il terminale disegnerebbe [ ◂ ] con gli spazi
+    const toggle = (
+      <Button
+        key="details"
+        label={compact ? '[▸]' : '[◂]'}
+        plain
+        dimColor
+        onPress={async () => {
+          lastCompact = !compact
+          await update($, isCompact, () => lastCompact)
+        }}
+      />
+    )
+
+    // Consumi e pulsante, sempre insieme sulla prima riga e separati da una pipe
+    const usageWithToggle = (
+      <Box>
+        <Text>
+          {usageRow}
+          <Text dimColor> │ </Text>
+        </Text>
+        {toggle}
+      </Box>
+    )
+
+    // Tutto su una riga se c'è posto, altrimenti due righe: una riga troppo lunga andrebbe a capo e si perderebbe la coda.
+    // Compatta la riga dell'ambiente sparisce e restano consumi e pulsante (" │ [▸]")
+    const envLength = compact
+      ? 0
+      : [folder, model, level !== null && String(level), account, modVersion && `usage-band v${modVersion}`]
+          .filter(Boolean)
+          .join(' │ ').length + 3
+    const isWide = compact || USAGE_ROW_WIDTH + 6 + envLength <= (e.viewport?.columns ?? 0)
 
     // Separatore dalla chat: una riga vuota e una linea tenue larga quanto la band
     const separator = <Text dimColor>{'─'.repeat(Math.max(e.props.bodyColumns ?? 0, 1))}</Text>
@@ -258,14 +321,22 @@ export const register: Register = on => {
       <Box flexDirection="column" marginTop={1}>
         {separator}
         {isWide ? (
-          <Text>
-            {usageRow}
-            <Text dimColor> │ </Text>
-            {envRow}
-          </Text>
+          <Box>
+            <Text>
+              {usageRow}
+              <Text dimColor> │ </Text>
+            </Text>
+            {toggle}
+            {compact ? null : (
+              <Text>
+                <Text dimColor> │ </Text>
+                {envRow}
+              </Text>
+            )}
+          </Box>
         ) : (
           <Box flexDirection="column">
-            {usageRow}
+            {usageWithToggle}
             {envRow}
           </Box>
         )}

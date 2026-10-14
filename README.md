@@ -2,7 +2,7 @@
 
 Mod per Claude Code che disegna una barra sopra il prompt con tre indicatori di consumo e alcune informazioni sull'ambiente:
 
-![La barra sopra il prompt, con uso normale e vicino ai limiti](docs/usage-band.png)
+![La barra sopra il prompt, con uso normale, vicino ai limiti e con i dettagli nascosti](docs/usage-band.png)
 
 L'immagine è un'illustrazione con valori di esempio.
 
@@ -10,8 +10,8 @@ L'immagine è un'illustrazione con valori di esempio.
 - **7g**: percentuale usata del limite settimanale, con giorno e orario di reset.
 - **ctx**: percentuale di riempimento della finestra di contesto della conversazione.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
-- **modello**: il modello in uso, come lo mostra `/model`, in arancio.
-- **effort**: l'effort in uso (`low`, `medium`, `high`, `xhigh`, `max`), in viola. Compare dopo il primo prompt
+- **modello**: il nome leggibile del modello in uso (`Opus 5.5`, non `claude-opus-5-5`), in arancio.
+- **effort**: l'effort in uso, solo il livello (`low`, `medium`, `high`, `xhigh`, `max`), in viola. Compare dopo il primo prompt
   (dalle richieste al modello e, a fine turno, dall'evento `Stop`) e solo per i modelli che hanno un effort.
 - **email**: l'account corrente, in azzurro, ricavata all'avvio con `claude auth status`
   (serve `claude` nel `PATH`; altrimenti compare dopo il primo prompt, dal contesto del messaggio).
@@ -21,6 +21,8 @@ I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90%
 Una voce senza dato mostra `n/d`.
 Se il terminale è abbastanza largo tutto sta su una riga, altrimenti i consumi restano
 sulla prima riga e cartella, modello, email e versione vanno sulla seconda.
+Subito dopo ctx, separato da una pipe, un pulsante (`[◂]`, cliccabile) nasconde cartella, modello, effort, email e versione
+lasciando solo i consumi; `[▸]` li rimostra. La scelta vale per la sessione e resta dopo `/clear`.
 La barra è sempre visibile e cede il posto solo ai sondaggi di Claude Code.
 I limiti 5h e settimanale esistono solo con un abbonamento Claude (Pro, Max, Team).
 

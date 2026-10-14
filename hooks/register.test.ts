@@ -20,7 +20,7 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   // Il motore sotto i plugin: nessun dato all'avvio, la misura viene dal test
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
-  on('session.model', () => ({ value: 'opus' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
@@ -43,8 +43,8 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   expect(await ui.find({ text: /↻ (\p{L}{3} )?\d{2}:\d{2}/u })).toBeDefined()
   // Cartella padre e cartella di lavoro, in giallo
   expect(await ui.find({ text: 'Claude\\mio-progetto' })).toBeDefined()
-  // Modello corrente ed email dell'account, ognuno col suo colore
-  expect(await ui.find({ text: 'opus' })).toBeDefined()
+  // Nome leggibile del modello corrente ed email dell'account, ognuno col suo colore
+  expect(await ui.find({ text: 'Opus 5.5' })).toBeDefined()
   expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
   // Versione del mod in fondo, letta dal suo plugin.json
   expect(await ui.find({ text: 'usage-band v9.9.9' })).toBeDefined()
@@ -136,10 +136,11 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
       ).drawn(),
     )
 
-  // Il Box esterno tiene separatore e barra; stretto: un secondo Box per le due righe, largo: solo Text annidati
+  // Il Box esterno tiene separatore e barra; largo: un Box per la riga col pulsante,
+  // stretto: un Box per le due righe e uno per la riga dell'ambiente col pulsante
   const boxes = (tree: string) => tree.split('"type":"Box"').length - 1
-  expect(boxes(await draw(60))).toBe(2)
-  expect(boxes(await draw(250))).toBe(1)
+  expect(boxes(await draw(60))).toBe(3)
+  expect(boxes(await draw(250))).toBe(2)
 })
 
 test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => {
@@ -161,21 +162,21 @@ test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => 
     $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
 
   // Prima di una richiesta l'effort non è noto: non compare
-  expect(await (await mount()).find({ text: /effort/ })).toBeUndefined()
+  expect(await (await mount()).find({ text: 'high' })).toBeUndefined()
 
-  // Una richiesta del loop principale con effort high: compare, tra modello ed email
+  // Una richiesta del loop principale con effort high: compare da solo, senza la parola effort, tra modello ed email
   const stream = $.turn.step({ turnId: 't1', index: 0, model: 'opus', effort: 'high', messageCount: 1 } as never)
   for await (const _chunk of stream) {
     // nessun chunk atteso
   }
-  expect(await (await mount()).find({ text: 'effort high' })).toBeDefined()
+  expect(await (await mount()).find({ text: 'high' })).toBeDefined()
 
   // Una richiesta di un subagente non cambia l'effort mostrato
   const sub = $.turn.step({ turnId: 't2', index: 0, model: 'haiku', effort: 'low', messageCount: 1, agentId: 'a1' } as never)
   for await (const _chunk of sub) {
     // nessun chunk atteso
   }
-  expect(await (await mount()).find({ text: 'effort high' })).toBeDefined()
+  expect(await (await mount()).find({ text: 'high' })).toBeDefined()
 })
 
 test("l'effort arriva anche dall'evento classico Stop, escluso quello dei subagenti", async ($, on) => {
@@ -195,11 +196,11 @@ test("l'effort arriva anche dall'evento classico Stop, escluso quello dei subage
 
   // Un Stop del thread principale con effort xhigh: compare
   await $.classic.Stop({ stop_hook_active: false, effort: { level: 'xhigh' } } as never)
-  expect(await (await mount()).find({ text: 'effort xhigh' })).toBeDefined()
+  expect(await (await mount()).find({ text: 'xhigh' })).toBeDefined()
 
   // Un Stop di un subagente non lo cambia
   await $.classic.Stop({ stop_hook_active: false, agent_id: 'a1', effort: { level: 'low' } } as never)
-  expect(await (await mount()).find({ text: 'effort xhigh' })).toBeDefined()
+  expect(await (await mount()).find({ text: 'xhigh' })).toBeDefined()
 })
 
 test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => {
@@ -229,4 +230,64 @@ test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => 
   expect(await ui.find({ text: /7g .* 31%/ })).toBeDefined()
   expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
   expect(await ui.find({ text: 'usage-band v9.9.9' })).toBeDefined()
+})
+
+test('il nome del modello è leggibile anche per ID datati, vecchio schema e contesto esteso', async ($, on) => {
+  let model = ''
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: model }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  await $.session.start(START)
+
+  const cases: [string, string][] = [
+    ['claude-sonnet-5-5-20260301', 'Sonnet 5.5'],
+    ['claude-3-5-sonnet-20241022', 'Sonnet 3.5'],
+    ['claude-opus-5-5[1m]', 'Opus 5.5 (1M)'],
+    ['haiku', 'Haiku'],
+    ['modello-sconosciuto.v2', 'modello-sconosciuto.v2'],
+  ]
+  for (const [id, label] of cases) {
+    model = id
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+    expect(await ui.find({ text: label })).toBeDefined()
+  }
+})
+
+test('il pulsante nasconde e rimostra cartella, modello, effort, email e versione', async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('classic.Stop', () => ({}))
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  await $.classic.Stop({ stop_hook_active: false, effort: { level: 'medium' } } as never)
+
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  // Visibili all'inizio
+  const ui = await mount()
+  expect(await ui.find({ text: 'Opus 5.5' })).toBeDefined()
+
+  // Premuto: restano i consumi, spariscono i dettagli
+  await ui.press({ key: 'details' })
+  const compact = await mount()
+  expect(await compact.find({ text: /5h .* 75%/ })).toBeDefined()
+  for (const text of ['Opus 5.5', 'medium', 'maurizio@mavida.com', 'usage-band v9.9.9', 'Claude\mio-progetto']) {
+    expect(await compact.find({ text })).toBeUndefined()
+  }
+
+  // Premuto di nuovo: tornano
+  await compact.press({ key: 'details' })
+  expect(await (await mount()).find({ text: 'Opus 5.5' })).toBeDefined()
 })
