@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
+import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
 import type { Limit, Snapshot } from '../types'
 
@@ -64,6 +64,49 @@ const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]
   return { context: context.percent, fiveHour: pick('five_hour'), sevenDay: pick('seven_day') }
 }
 
+// Ultimi limiti 5h/7g visti nel processo: la variabile del modulo sopravvive a /clear (lo stato no)
+// e fa da ripiego finché la sessione nuova non ha una lettura sua
+let lastLimits: Pick<Snapshot, 'fiveHour' | 'sevenDay'> = {}
+
+// Ultima email e versione note nel processo: stesso ripiego, letto dalla barra quando lo stato è vuoto
+let lastEmail: string | null = null
+let lastVersion: string | null = null
+
+// Riempie gli atom della sessione: misura corrente, versione del mod ed email dell'account.
+// Serve all'avvio e dopo /clear, che apre una sessione con lo stato vuoto senza rifare session.start
+const fill = async ($: EngineInterface) => {
+  const usage = await $.session.usage()
+  const measured = toSnapshot(usage.context, usage.rateLimits)
+  if (measured.fiveHour || measured.sevenDay) {
+    lastLimits = { fiveHour: measured.fiveHour, sevenDay: measured.sevenDay }
+  }
+  await update($, snapshot, () => ({
+    ...measured,
+    fiveHour: measured.fiveHour ?? lastLimits.fiveHour,
+    sevenDay: measured.sevenDay ?? lastLimits.sevenDay,
+  }))
+
+  // Versione del mod, dal suo plugin.json (il file è del plugin, quindi leggibile)
+  const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+  lastVersion = manifest.version ?? null
+  await update($, version, () => lastVersion)
+
+  // Email dell'account da `claude auth status`, senza bloccare; se il comando non c'è
+  // o fallisce resta il ripiego del hook prompt.context
+  void (async () => {
+    try {
+      const { stdout } = await $.process.run(['claude', 'auth', 'status'])
+      const found = JSON.parse(stdout).email
+      if (found) {
+        lastEmail = found
+        await update($, email, () => found)
+      }
+    } catch {
+      // nessun comando claude nel PATH o output non JSON: l'email resta non nota
+    }
+  })()
+}
+
 export const register: Register = on => {
   // All'avvio (e dopo ogni reload) registra il comando e prende subito le cifre correnti
   on('session.start', async ($, e, next) => {
@@ -72,33 +115,29 @@ export const register: Register = on => {
       description: 'Mostra o nasconde la barra di uso sopra il prompt',
     })
     const result = await next(e)
-    const usage = await $.session.usage()
-    await update($, snapshot, () => toSnapshot(usage.context, usage.rateLimits))
+    await fill($)
 
-    // Versione del mod, dal suo plugin.json (il file è del plugin, quindi leggibile)
-    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
-    await update($, version, () => manifest.version ?? null)
+    return result
+  })
 
-    // Email dell'account da `claude auth status`, senza bloccare l'avvio; se il comando non c'è
-    // o fallisce resta il ripiego del hook prompt.context
-    void (async () => {
-      try {
-        const { stdout } = await $.process.run(['claude', 'auth', 'status'])
-        const found = JSON.parse(stdout).email
-        if (found) {
-          await update($, email, () => found)
-        }
-      } catch {
-        // nessun comando claude nel PATH o output non JSON: l'email resta non nota
-      }
-    })()
+  // Dopo /clear lo stato della sessione riparte vuoto e session.start non scatta: lo riempie di nuovo
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    if (e.source === 'clear') {
+      // un errore qui non deve bloccare il /clear: al massimo la barra resta con n/d
+      await fill($).catch(() => undefined)
+    }
 
     return result
   })
 
   // Dopo ogni turno, o quando un limite si muove di un punto: aggiorna la misura e ridisegna
   on('session.measure', async ($, e, next) => {
-    await update($, snapshot, () => toSnapshot(e.context, e.rateLimits))
+    const measured = toSnapshot(e.context, e.rateLimits)
+    if (measured.fiveHour || measured.sevenDay) {
+      lastLimits = { fiveHour: measured.fiveHour, sevenDay: measured.sevenDay }
+    }
+    await update($, snapshot, () => measured)
 
     return next(e)
   })
@@ -129,6 +168,7 @@ export const register: Register = on => {
     const found = block?.text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/)?.[0]
 
     if (found) {
+      lastEmail = found
       await update($, email, () => found)
     }
 
@@ -150,12 +190,18 @@ export const register: Register = on => {
       return next(e)
     }
 
-    const data = await read($, snapshot)
+    // Dopo /clear lo stato della sessione è vuoto: per 5h/7g, versione ed email valgono gli ultimi visti nel processo
+    const measured = await read($, snapshot)
+    const data: Snapshot = {
+      ...measured,
+      fiveHour: measured?.fiveHour ?? lastLimits.fiveHour,
+      sevenDay: measured?.sevenDay ?? lastLimits.sevenDay,
+    }
     const folder = folderLabel(await $.session.cwd())
     const model = await $.session.model()
-    const modVersion = await read($, version)
+    const modVersion = (await read($, version)) ?? lastVersion
     const level = await read($, effort)
-    const account = await read($, email)
+    const account = (await read($, email)) ?? lastEmail
     const { Box, Text } = $.ui.resolve(e)
 
     // Un segmento: etichetta, barra e percentuale colorate, reset opzionale

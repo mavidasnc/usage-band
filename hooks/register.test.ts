@@ -197,3 +197,32 @@ test("l'effort arriva anche dall'evento classico Stop, escluso quello dei subage
   await $.classic.Stop({ stop_hook_active: false, agent_id: 'a1', effort: { level: 'low' } } as never)
   expect(await (await mount()).find({ text: 'effort xhigh' })).toBeDefined()
 })
+
+test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('classic.SessionStart', () => ({}))
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+
+  // Il /clear: la sessione nuova parte senza lettura dei limiti, il ripiego tiene gli ultimi visti
+  await $.classic.SessionStart({ source: 'clear' })
+  const ui = await $.ui.mount({
+    plugin: 'usage-band',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: PROPS,
+  })
+
+  expect(await ui.find({ text: /5h .* 75%/ })).toBeDefined()
+  expect(await ui.find({ text: /7g .* 31%/ })).toBeDefined()
+  expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
+  expect(await ui.find({ text: 'usage-band v9.9.9' })).toBeDefined()
+})

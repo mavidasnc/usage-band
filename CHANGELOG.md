@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.5.2] - 2026-10-14
+
+### Corretto
+- Dopo `/clear` la barra perdeva i consumi di 5h e 7g (n/d), l'email dell'account e la versione del mod: lo stato del mod è per sessione e `/clear` ne apre una nuova senza rifare `session.start`. Ora la barra, quando lo stato è vuoto, mostra gli ultimi 5h/7g, email e versione visti nel processo; in più l'evento classico `SessionStart` con `source: 'clear'`, dove gira, rilegge consumi, versione ed email.
+
 ## [0.5.1] - 2026-10-13
 
 ### Corretto
