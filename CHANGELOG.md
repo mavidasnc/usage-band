@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.10.0] - 2026-10-15
+
+### Aggiunto
+- Con il modello `opusplan` (Opus in plan mode, Sonnet altrimenti) il nome del modello effettivo è seguito da ` (P)`, ad esempio `Sonnet 5.5 (P)`. La scelta viene dall'ultimo cambio di modello nella sessione (`/model`, selettore, SDK, ripresa), altrimenti da `ANTHROPIC_MODEL`, altrimenti dal campo `model` delle impostazioni; un avvio con `--model opusplan` non è visibile al mod finché non si cambia modello nella sessione.
+
 ## [0.9.0] - 2026-10-15
 
 ### Aggiunto

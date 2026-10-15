@@ -10,7 +10,8 @@ L'immagine è un'illustrazione con valori di esempio.
 - **7g**: percentuale usata del limite settimanale, con giorno e orario di reset.
 - **ctx**: percentuale di riempimento della finestra di contesto della conversazione.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
-- **modello**: il nome leggibile del modello in uso (`Opus 5.5`, non `claude-opus-5-5`), in arancio.
+- **modello**: il nome leggibile del modello in uso (`Opus 5.5`, non `claude-opus-5-5`), in arancio;
+  con `opusplan` è seguito da ` (P)` (`Sonnet 5.5 (P)`).
 - **effort**: l'effort in uso, solo il livello (`low`, `medium`, `high`, `xhigh`, `max`), in viola. Compare dopo il primo prompt
   (dalle richieste al modello e, a fine turno, dall'evento `Stop`) e solo per i modelli che hanno un effort.
 - **email**: l'account corrente, in azzurro, ricavata all'avvio con `claude auth status`

@@ -153,6 +153,20 @@ let lastVersion: string | null = null
 // Ultima scelta del pulsante dei dettagli, con lo stesso ripiego dopo /clear
 let lastCompact = false
 
+// Modello chiesto nell'ultimo cambio (/model, picker, SDK, ripresa): un alias come "opusplan", un ID, '' per il default;
+// undefined finché non c'è un cambio, e allora vale l'impostazione di avvio
+let requestedModel: string | undefined
+
+// True quando il modello scelto è opusplan (Opus in plan mode, Sonnet altrimenti): $.session.model() dà solo quello effettivo.
+// Precedenza come nel motore: cambio nella sessione, poi ANTHROPIC_MODEL, poi il campo model delle impostazioni
+const isOpusPlan = async ($: EngineInterface) => {
+  const chosen =
+    requestedModel ??
+    (await $.env.get('ANTHROPIC_MODEL')) ??
+    (await $.settings.read().then(s => s.model, () => undefined))
+  return typeof chosen === 'string' && /^opusplan\b/i.test(chosen)
+}
+
 // Durata della cache letta dalle variabili d'ambiente all'avvio: 'off' con la cache disattivata, null se non indicata
 let envCacheTtl: '5m' | '1h' | 'off' | null = null
 
@@ -415,6 +429,7 @@ export const register: Register = on => {
     return next(e)
   })
   on('classic.PostModelSwitch', async ($, e, next) => {
+    requestedModel = e.requested_model ?? ''
     await update($, cacheTtl, () => e.cache_ttl)
     await scheduleCacheTick($)
 
@@ -458,7 +473,8 @@ export const register: Register = on => {
       sevenDay: measured?.sevenDay ?? lastLimits.sevenDay,
     }
     const folder = folderLabel(await $.session.cwd())
-    const model = modelLabel(await $.session.model())
+    // Con opusplan il modello effettivo è seguito da " (P)"
+    const model = modelLabel(await $.session.model()) + ((await isOpusPlan($).catch(() => false)) ? ' (P)' : '')
     const modVersion = (await read($, version)) ?? lastVersion
     const level = await read($, effort)
     const account = (await read($, email)) ?? lastEmail
