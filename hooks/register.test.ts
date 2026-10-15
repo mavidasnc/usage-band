@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 // Proprietà della band come le passa il motore
 const PROPS = { hasSurvey: false, isWorking: false, maxRows: 10 } as never
@@ -47,7 +47,7 @@ test('la barra mostra le tre percentuali con i colori per soglia', async ($, on)
   expect(await ui.find({ text: 'Opus 5.5' })).toBeDefined()
   expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
   // Versione del mod in fondo, letta dal suo plugin.json
-  expect(await ui.find({ text: 'usage-band v9.9.9' })).toBeDefined()
+  expect(await ui.find({ text: 'v9.9.9' })).toBeDefined()
   // Separata dalla chat da una riga vuota e da una linea tenue
   expect(await ui.find({ text: /^─+$/ })).toBeDefined()
   expect(JSON.stringify(await ui.drawn())).toContain('"marginTop":1')
@@ -229,7 +229,7 @@ test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => 
   expect(await ui.find({ text: /5h .* 75%/ })).toBeDefined()
   expect(await ui.find({ text: /7g .* 31%/ })).toBeDefined()
   expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
-  expect(await ui.find({ text: 'usage-band v9.9.9' })).toBeDefined()
+  expect(await ui.find({ text: 'v9.9.9' })).toBeDefined()
 })
 
 test('il nome del modello è leggibile anche per ID datati, vecchio schema e contesto esteso', async ($, on) => {
@@ -283,11 +283,96 @@ test('il pulsante nasconde e rimostra cartella, modello, effort, email e version
   await ui.press({ key: 'details' })
   const compact = await mount()
   expect(await compact.find({ text: /5h .* 75%/ })).toBeDefined()
-  for (const text of ['Opus 5.5', 'medium', 'maurizio@mavida.com', 'usage-band v9.9.9', 'Claude\mio-progetto']) {
+  for (const text of ['Opus 5.5', 'medium', 'maurizio@mavida.com', 'v9.9.9', 'Claude\mio-progetto']) {
     expect(await compact.find({ text })).toBeUndefined()
   }
 
   // Premuto di nuovo: tornano
   await compact.press({ key: 'details' })
   expect(await (await mount()).find({ text: 'Opus 5.5' })).toBeDefined()
+})
+
+// Il motore sotto la band per i test della cache: dati minimi e turn.step che risponde senza chunk
+const stubEngine = (on: Parameters<Parameters<typeof test>[1]>[1]) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never
+  })
+}
+
+// Gli ultimi 10 minuti simulati scattano di secondo in secondo: serve più del tempo standard di un test
+test('la cache mostra i minuti sopra i 10 minuti, poi minuti e secondi, poi scaduta', { timeoutMs: 30000 }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  stubEngine(on)
+  await $.session.start(START)
+
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  const step = async (agentId?: string) => {
+    for await (const _chunk of $.turn.step({ turnId: 't', index: 0, model: 'opus', messageCount: 1, agentId } as never)) {
+      // nessun chunk atteso
+    }
+  }
+
+  // Prima della prima richiesta la scadenza non è nota
+  expect(await (await mount()).find({ text: /cache n\/d/ })).toBeDefined()
+
+  // Subito dopo una richiesta: un'ora piena, in minuti e in verde
+  await step()
+  const fresh = await mount()
+  expect(await fresh.find({ text: /cache 60m/ })).toBeDefined()
+  expect(JSON.stringify(await fresh.drawn())).toContain('"success"')
+
+  // A 10 minuti esatti passa a minuti e secondi, poi scende di secondo in secondo, in rosso sotto i 6 minuti
+  await clock.advance(50 * 60_000)
+  expect(await (await mount()).find({ text: /cache 10:00/ })).toBeDefined()
+  await clock.advance(1000)
+  expect(await (await mount()).find({ text: /cache 9:59/ })).toBeDefined()
+
+  // La richiesta di un subagente non rinnova la cache del thread principale
+  await step('a1')
+  expect(await (await mount()).find({ text: /cache 9:59/ })).toBeDefined()
+
+  // Allo scadere
+  await clock.advance(10 * 60_000)
+  expect(await (await mount()).find({ text: /cache scaduta/ })).toBeDefined()
+})
+
+test('la durata della cache viene dalle variabili di ambiente e dal cambio di modello', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.env(on, { ENABLE_PROMPT_CACHING_1H: '1', FORCE_PROMPT_CACHING_5M: '1' })
+  stubEngine(on)
+  on('classic.PostModelSwitch', () => ({}))
+  await $.session.start(START)
+
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  for await (const _chunk of $.turn.step({ turnId: 't', index: 0, model: 'opus', messageCount: 1 } as never)) {
+    // nessun chunk atteso
+  }
+
+  // FORCE_PROMPT_CACHING_5M vince: cinque minuti, già sotto la soglia dei secondi
+  expect(await (await mount()).find({ text: /cache 5:00/ })).toBeDefined()
+
+  // Il motore riporta un'ora al cambio di modello: vale il suo dato
+  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
+  expect(await (await mount()).find({ text: /cache 60m/ })).toBeDefined()
+})
+
+test('con la cache disattivata la voce non compare', async ($, on) => {
+  mock.clock(on)
+  mock.env(on, { DISABLE_PROMPT_CACHING: '1' })
+  stubEngine(on)
+  await $.session.start(START)
+
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ text: /ctx/ })).toBeDefined()
+  expect(await ui.find({ text: /cache/ })).toBeUndefined()
 })

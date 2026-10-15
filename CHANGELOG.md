@@ -2,6 +2,14 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.8.0] - 2026-10-15
+
+### Aggiunto
+- Dopo ctx, prima del pulsante, il tempo residuo della cache del prompt: in minuti (`cache 42m`) finché mancano più di 10 minuti, poi in minuti e secondi (`cache 9:58`); `cache scaduta` allo scadere e `cache n/d` prima della prima richiesta. Il countdown riparte a ogni richiesta del thread principale (non a quelle dei subagenti), è verde, giallo sotto il 25% della durata e rosso sotto il 10%. La durata viene dal motore al cambio di modello, altrimenti da `FORCE_PROMPT_CACHING_5M` / `ENABLE_PROMPT_CACHING_1H`, altrimenti vale un'ora; con `DISABLE_PROMPT_CACHING` la voce non compare.
+
+### Modificato
+- La versione del mod compare da sola (`v0.8.0`), senza il nome `usage-band`.
+
 ## [0.7.0] - 2026-10-14
 
 ### Aggiunto

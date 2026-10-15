@@ -21,8 +21,20 @@ const isCompact = atom({ plugin: 'usage-band', key: 'isCompact' } as const, fals
 // Effort dell'ultima richiesta al modello (low, medium, high, xhigh, max o un numero), noto dopo il primo prompt
 const effort = atom({ plugin: 'usage-band', key: 'effort' } as const, null)
 
-// Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset)
-const USAGE_ROW_WIDTH = 90
+// Istante, in millisecondi di $.clock.now(), dell'ultima richiesta al modello del loop principale: rinnova la cache del prompt
+const lastRequestAt = atom({ plugin: 'usage-band', key: 'lastRequestAt' } as const, null)
+
+// Durata della cache del prompt riportata dal motore nei cambi di modello; null finché non arriva
+const cacheTtl = atom({ plugin: 'usage-band', key: 'cacheTtl' } as const, null)
+
+// Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset, cache)
+const USAGE_ROW_WIDTH = 106
+
+// Durate della cache del prompt, in millisecondi
+const CACHE_TTL_MS = { '5m': 5 * 60_000, '1h': 60 * 60_000 } as const
+
+// Sotto questa soglia il countdown passa da minuti a minuti e secondi
+const CACHE_SECONDS_FROM_MS = 10 * 60_000
 
 // Larghezza delle barre grafiche, in blocchi
 const BAR_WIDTH = 10
@@ -84,6 +96,22 @@ const modelLabel = (id: string) => {
   return id
 }
 
+// Tempo residuo della cache: solo minuti (arrotondati per eccesso) sopra i 10 minuti, poi m:ss; a zero 'scaduta'
+const cacheLabel = (remainingMs: number) => {
+  if (remainingMs <= 0) {
+    return 'scaduta'
+  }
+  if (remainingMs > CACHE_SECONDS_FROM_MS) {
+    return `${Math.ceil(remainingMs / 60_000)}m`
+  }
+  const seconds = Math.ceil(remainingMs / 1000)
+  return `${Math.floor(seconds / 60)}:${pad(seconds % 60)}`
+}
+
+// Colore della cache in base alla quota residua: verde, giallo sotto il 25%, rosso sotto il 10%
+const cacheColor = (remainingMs: number, ttlMs: number) =>
+  remainingMs < ttlMs * 0.1 ? 'error' : remainingMs < ttlMs * 0.25 ? 'warning' : 'success'
+
 // Ricava dai dati del motore le tre percentuali che la barra mostra
 const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]): Snapshot => {
   const pick = (kind: string): Limit | undefined => {
@@ -104,6 +132,69 @@ let lastVersion: string | null = null
 
 // Ultima scelta del pulsante dei dettagli, con lo stesso ripiego dopo /clear
 let lastCompact = false
+
+// Durata della cache letta dalle variabili d'ambiente all'avvio: 'off' con la cache disattivata, null se non indicata
+let envCacheTtl: '5m' | '1h' | 'off' | null = null
+
+// Timer che ridisegna la barra quando l'etichetta della cache cambia, e l'ultima etichetta disegnata
+let cacheTimer: { cancel: () => void } | null = null
+let lastCacheLabel: string | null = null
+
+// Stato corrente della cache: durata in uso e millisecondi residui (null prima della prima richiesta), oppure null se disattivata
+const cacheState = async ($: EngineInterface) => {
+  const ttl = (await read($, cacheTtl)) ?? envCacheTtl ?? '1h'
+  if (ttl === 'off') {
+    return null
+  }
+  const ttlMs = CACHE_TTL_MS[ttl]
+  const lastAt = await read($, lastRequestAt)
+  const remainingMs = lastAt === null ? null : Math.max(lastAt + ttlMs - (await $.clock.now()), 0)
+
+  return { ttlMs, remainingMs }
+}
+
+// Durata della cache dalle variabili di Claude Code: disattivata, forzata a 5 minuti o estesa a un'ora
+const readEnvCacheTtl = async ($: EngineInterface): Promise<typeof envCacheTtl> => {
+  try {
+    if (await $.env.get('DISABLE_PROMPT_CACHING')) {
+      return 'off'
+    }
+    if (await $.env.get('FORCE_PROMPT_CACHING_5M')) {
+      return '5m'
+    }
+    if (await $.env.get('ENABLE_PROMPT_CACHING_1H')) {
+      return '1h'
+    }
+  } catch {
+    // ambiente non leggibile: vale il ripiego
+  }
+  return null
+}
+
+// Ridisegna la barra se l'etichetta della cache è cambiata e si risveglia quando cambierà di nuovo:
+// al prossimo minuto sopra i 10 minuti, al prossimo secondo sotto; fermo con n/d, scaduta o cache disattivata.
+// Va richiamata a ogni richiesta e a ogni cambio di durata
+const scheduleCacheTick = async ($: EngineInterface) => {
+  cacheTimer?.cancel()
+  cacheTimer = null
+  try {
+    const state = await cacheState($)
+    const remainingMs = state?.remainingMs ?? null
+    const label = state === null ? null : remainingMs === null ? 'n/d' : cacheLabel(remainingMs)
+    if (label !== lastCacheLabel) {
+      lastCacheLabel = label
+      $.ui.invalidate('ui.render')
+    }
+    if (remainingMs !== null && remainingMs > 0) {
+      const unit = remainingMs > CACHE_SECONDS_FROM_MS ? 60_000 : 1000
+      cacheTimer = $.clock.after(((remainingMs - 1) % unit) + 1, () => {
+        void scheduleCacheTick($)
+      })
+    }
+  } catch {
+    // orologio non disponibile: la cache si aggiorna solo ai ridisegni del motore
+  }
+}
 
 // Riempie gli atom della sessione: misura corrente, versione del mod ed email dell'account.
 // Serve all'avvio e dopo /clear, che apre una sessione con lo stato vuoto senza rifare session.start
@@ -149,6 +240,8 @@ export const register: Register = on => {
     })
     const result = await next(e)
     await fill($)
+    envCacheTtl = await readEnvCacheTtl($)
+    await scheduleCacheTick($)
 
     return result
   })
@@ -179,6 +272,12 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       await update($, effort, () => e.effort ?? null)
+      // la richiesta rinnova la cache del prompt: il countdown riparte da qui
+      const now = await $.clock.now().catch(() => null)
+      if (now !== null) {
+        await update($, lastRequestAt, () => now)
+        await scheduleCacheTick($)
+      }
     }
 
     return yield* next(e)
@@ -190,6 +289,20 @@ export const register: Register = on => {
     if (e.agent_id === undefined && e.effort) {
       await update($, effort, () => e.effort.level)
     }
+
+    return next(e)
+  })
+
+  // I cambi di modello riportano la durata della cache del prompt usata dal motore: la ricorda per il countdown
+  on('classic.PreModelSwitch', async ($, e, next) => {
+    await update($, cacheTtl, () => e.cache_ttl)
+    await scheduleCacheTick($)
+
+    return next(e)
+  })
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    await update($, cacheTtl, () => e.cache_ttl)
+    await scheduleCacheTick($)
 
     return next(e)
   })
@@ -236,6 +349,7 @@ export const register: Register = on => {
     const level = await read($, effort)
     const account = (await read($, email)) ?? lastEmail
     const compact = (await read($, isCompact)) || lastCompact
+    const cache = await cacheState($).catch(() => null)
     const { Box, Button, Text } = $.ui.resolve(e)
 
     // Un segmento: etichetta, barra e percentuale colorate, reset opzionale
@@ -252,7 +366,18 @@ export const register: Register = on => {
         </Text>
       )
 
-    // Riga dei consumi: 5h, 7g e contesto
+    // Tempo residuo della cache del prompt: n/d prima della prima richiesta, scaduta a zero; assente con la cache disattivata
+    const cacheSegment =
+      cache === null ? null : cache.remainingMs === null || cache.remainingMs === 0 ? (
+        <Text dimColor>cache {cache.remainingMs === null ? 'n/d' : cacheLabel(0)}</Text>
+      ) : (
+        <Text>
+          <Text dimColor>cache </Text>
+          <Text color={cacheColor(cache.remainingMs, cache.ttlMs)}>{cacheLabel(cache.remainingMs)}</Text>
+        </Text>
+      )
+
+    // Riga dei consumi: 5h, 7g, contesto e cache
     const usageRow = (
       <Text>
         {segment('5h', data?.fiveHour?.percent, data?.fiveHour?.resetsAt)}
@@ -260,6 +385,8 @@ export const register: Register = on => {
         {segment('7g', data?.sevenDay?.percent, data?.sevenDay?.resetsAt)}
         <Text dimColor> │ </Text>
         {segment('ctx', data?.context)}
+        {cacheSegment ? <Text dimColor> │ </Text> : null}
+        {cacheSegment}
       </Text>
     )
 
@@ -275,7 +402,7 @@ export const register: Register = on => {
         {account ? <Text dimColor> │ </Text> : null}
         {account ? <Text color="suggestion">{account}</Text> : null}
         {modVersion ? <Text dimColor> │ </Text> : null}
-        {modVersion ? <Text color="planMode">usage-band v{modVersion}</Text> : null}
+        {modVersion ? <Text color="planMode">v{modVersion}</Text> : null}
       </Text>
     )
 
@@ -309,7 +436,7 @@ export const register: Register = on => {
     // Compatta la riga dell'ambiente sparisce e restano consumi e pulsante (" │ [▸]")
     const envLength = compact
       ? 0
-      : [folder, model, level !== null && String(level), account, modVersion && `usage-band v${modVersion}`]
+      : [folder, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
           .filter(Boolean)
           .join(' │ ').length + 3
     const isWide = compact || USAGE_ROW_WIDTH + 6 + envLength <= (e.viewport?.columns ?? 0)
