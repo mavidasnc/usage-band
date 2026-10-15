@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
+import type { EngineInterface, ModelUsage, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
-import type { Limit, Snapshot } from '../types'
+import type { Limit, Operation, Snapshot } from '../types'
 
 // Ultima misura dell'uso, letta dal disegno della barra
 const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
@@ -26,6 +26,12 @@ const lastRequestAt = atom({ plugin: 'usage-band', key: 'lastRequestAt' } as con
 
 // Durata della cache del prompt riportata dal motore nei cambi di modello; null finché non arriva
 const cacheTtl = atom({ plugin: 'usage-band', key: 'cacheTtl' } as const, null)
+
+// Token dell'ultima operazione (l'ultimo prompt con tutte le sue richieste e i suoi subagenti); null prima del primo prompt
+const operation = atom({ plugin: 'usage-band', key: 'operation' } as const, null)
+
+// True quando i token mostrano il dettaglio (ingresso, uscita, letti dalla cache, agenti) invece del solo totale
+const isTokenDetailed = atom({ plugin: 'usage-band', key: 'isTokenDetailed' } as const, false)
 
 // Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset, cache)
 const USAGE_ROW_WIDTH = 106
@@ -112,6 +118,20 @@ const cacheLabel = (remainingMs: number) => {
 const cacheColor = (remainingMs: number, ttlMs: number) =>
   remainingMs < ttlMs * 0.1 ? 'error' : remainingMs < ttlMs * 0.25 ? 'warning' : 'success'
 
+// Numero di token abbreviato: 842, 12.4k, 1.23M
+const tokenLabel = (n: number) =>
+  n < 1000 ? String(n) : n < 1_000_000 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1_000_000).toFixed(2)}M`
+
+// Totale dell'operazione: la somma di tutto (ingresso, uscita e letti dalla cache; gli agenti sono già dentro)
+const operationTotal = (op: Operation) => op.input + op.output + op.cacheRead
+
+// Testo della voce token, senza l'etichetta: il totale o il dettaglio (↑ ingresso, ↓ uscita, ♺ letti dalla cache,
+// tra parentesi ∴ la parte dei subagenti, già compresa negli altri)
+const operationText = (op: Operation, detailed: boolean) =>
+  detailed
+    ? `↑${tokenLabel(op.input)} ↓${tokenLabel(op.output)} ♺ ${tokenLabel(op.cacheRead)} (∴${tokenLabel(op.agents)})`
+    : tokenLabel(operationTotal(op))
+
 // Ricava dai dati del motore le tre percentuali che la barra mostra
 const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]): Snapshot => {
   const pick = (kind: string): Limit | undefined => {
@@ -139,6 +159,47 @@ let envCacheTtl: '5m' | '1h' | 'off' | null = null
 // Timer che ridisegna la barra quando l'etichetta della cache cambia, e l'ultima etichetta disegnata
 let cacheTimer: { cancel: () => void } | null = null
 let lastCacheLabel: string | null = null
+
+// Operazione a cui appartiene ogni subagente (agentId → id dell'operazione), anche per gli agenti nati da altri agenti
+const agentOperation = new Map<string, string>()
+
+// Ultima operazione e ultimo formato dei token: ripiego dopo /clear, come per email e versione
+let lastOperation: Operation | null = null
+let lastTokenDetailed = false
+
+// Origini dei prompt scritti dalla persona: solo questi aprono una nuova operazione
+const USER_ORIGINS: string[] = ['composer', 'bridge', 'sdk']
+
+// True tra un prompt della persona e l'inizio del turno che lo esegue
+let isUserPromptPending = false
+
+// Somma i token di una richiesta all'operazione corrente; quelli di un agente di un'operazione precedente si scartano
+const addUsage = async ($: EngineInterface, agentId: string | undefined, usage: ModelUsage | null | undefined) => {
+  if (!usage) {
+    return
+  }
+  const current = await read($, operation)
+  // un agente mai visto (spawn non ascoltato o ancora in corso) appartiene all'operazione corrente
+  const owner = agentId === undefined ? current?.id : agentOperation.get(agentId) ?? current?.id
+  if (!current || owner !== current.id) {
+    return
+  }
+  const fresh = usage.input_tokens + usage.cache_creation_input_tokens
+  const total = fresh + usage.output_tokens + usage.cache_read_input_tokens
+  await update($, operation, op => {
+    if (!op || op.id !== current.id) {
+      return op
+    }
+    lastOperation = {
+      ...op,
+      input: op.input + fresh,
+      output: op.output + usage.output_tokens,
+      cacheRead: op.cacheRead + usage.cache_read_input_tokens,
+      agents: op.agents + (agentId === undefined ? 0 : total),
+    }
+    return lastOperation
+  })
+}
 
 // Stato corrente della cache: durata in uso e millisecondi residui (null prima della prima richiesta), oppure null se disattivata
 const cacheState = async ($: EngineInterface) => {
@@ -268,7 +329,57 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Ogni richiesta al modello porta l'effort in uso: lo registra per il loop principale e lascia passare tutto
+  // Un prompt della persona (terminale, Remote Control o SDK), non un comando slash: il prossimo turno
+  // del loop principale aprirà una nuova operazione. Notifiche di task e agenti, loop e plugin non la aprono
+  on('prompt.submit', async ($, e, next) => {
+    if (USER_ORIGINS.includes(e.origin.kind) && !e.command && !e.isMeta) {
+      isUserPromptPending = true
+    }
+
+    return next(e)
+  })
+
+  // Il turno del loop principale che segue un prompt della persona apre una nuova operazione con i token a zero;
+  // gli altri (notifica di un agente in background, ripartenza senza testo) continuano quella in corso
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined && isUserPromptPending) {
+      isUserPromptPending = false
+      lastOperation = { id: e.turnId, input: 0, output: 0, cacheRead: 0, agents: 0 }
+      await update($, operation, () => lastOperation)
+    }
+    // Il turno di un subagente appartiene all'operazione in corso quando parte: vale anche per un agente
+    // risvegliato da un prompt successivo, e non dipende dall'ordine con cui agent.spawn risponde
+    if (e.agentId !== undefined) {
+      const current = await read($, operation)
+      if (current) {
+        agentOperation.set(e.agentId, current.id)
+      }
+    }
+
+    return next(e)
+  })
+
+  // Ogni subagente appartiene all'operazione in cui è nato: quella corrente, o quella dell'agente che l'ha lanciato
+  on('agent.spawn', async ($, e, next) => {
+    const result = await next(e)
+    const owner = e.parentAgentId === undefined ? (await read($, operation))?.id : agentOperation.get(e.parentAgentId)
+    if (result.agentId && owner) {
+      agentOperation.set(result.agentId, owner)
+    }
+
+    return result
+  })
+
+  // Anche il riassunto della compattazione consuma token: si sommano all'operazione in cui avviene
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    await addUsage($, e.agentId, result.usage)
+
+    return result
+  })
+
+  // Ogni richiesta al modello porta l'effort in uso: lo registra per il loop principale e lascia passare tutto;
+  // alla risposta somma i suoi token all'operazione
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       await update($, effort, () => e.effort ?? null)
@@ -280,7 +391,10 @@ export const register: Register = on => {
       }
     }
 
-    return yield* next(e)
+    const result = yield* next(e)
+    await addUsage($, e.agentId, result.usage)
+
+    return result
   })
 
   // A fine turno l'evento classico Stop porta l'effort applicato (effort.level): seconda fonte,
@@ -350,6 +464,8 @@ export const register: Register = on => {
     const account = (await read($, email)) ?? lastEmail
     const compact = (await read($, isCompact)) || lastCompact
     const cache = await cacheState($).catch(() => null)
+    const tokens = (await read($, operation)) ?? lastOperation
+    const detailed = (await read($, isTokenDetailed)) || lastTokenDetailed
     const { Box, Button, Text } = $.ui.resolve(e)
 
     // Un segmento: etichetta, barra e percentuale colorate, reset opzionale
@@ -390,20 +506,38 @@ export const register: Register = on => {
       </Text>
     )
 
-    // Riga dell'ambiente: cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione del mod (verde acqua);
-    // effort, email e versione compaiono quando sono noti
+    // Token dell'ultima operazione, in testa alla riga dell'ambiente: l'intera voce ("tkn" e valori) è un pulsante che alterna
+    // il totale e il dettaglio; la voce compare dopo il primo prompt
+    const tokenItem = tokens ? (
+      <Button
+        key="tokens"
+        label={`tkn ${operationText(tokens, detailed)}`}
+        plain
+        onPress={async () => {
+          lastTokenDetailed = !detailed
+          await update($, isTokenDetailed, () => lastTokenDetailed)
+        }}
+      />
+    ) : null
+
+    // Riga dell'ambiente: token, cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione del mod (verde acqua);
+    // token, effort, email e versione compaiono quando sono noti
     const envRow = (
-      <Text>
-        <Text color="warning">{folder}</Text>
-        <Text dimColor> │ </Text>
-        <Text color="claude">{model}</Text>
-        {level !== null ? <Text dimColor> │ </Text> : null}
-        {level !== null ? <Text color="autoAccept">{level}</Text> : null}
-        {account ? <Text dimColor> │ </Text> : null}
-        {account ? <Text color="suggestion">{account}</Text> : null}
-        {modVersion ? <Text dimColor> │ </Text> : null}
-        {modVersion ? <Text color="planMode">v{modVersion}</Text> : null}
-      </Text>
+      <Box>
+        {tokenItem}
+        <Text>
+          {tokens ? <Text dimColor> │ </Text> : null}
+          <Text color="warning">{folder}</Text>
+          <Text dimColor> │ </Text>
+          <Text color="claude">{model}</Text>
+          {level !== null ? <Text dimColor> │ </Text> : null}
+          {level !== null ? <Text color="autoAccept">{level}</Text> : null}
+          {account ? <Text dimColor> │ </Text> : null}
+          {account ? <Text color="suggestion">{account}</Text> : null}
+          {modVersion ? <Text dimColor> │ </Text> : null}
+          {modVersion ? <Text color="planMode">v{modVersion}</Text> : null}
+        </Text>
+      </Box>
     )
 
     // Pulsante subito dopo il contesto, così non si sposta: [▸] mostra i dettagli dell'ambiente, [◂] li nasconde lasciando solo i consumi.
@@ -436,7 +570,7 @@ export const register: Register = on => {
     // Compatta la riga dell'ambiente sparisce e restano consumi e pulsante (" │ [▸]")
     const envLength = compact
       ? 0
-      : [folder, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
+      : [tokens && `tkn ${operationText(tokens, detailed)}`, folder, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
           .filter(Boolean)
           .join(' │ ').length + 3
     const isWide = compact || USAGE_ROW_WIDTH + 6 + envLength <= (e.viewport?.columns ?? 0)
@@ -454,12 +588,8 @@ export const register: Register = on => {
               <Text dimColor> │ </Text>
             </Text>
             {toggle}
-            {compact ? null : (
-              <Text>
-                <Text dimColor> │ </Text>
-                {envRow}
-              </Text>
-            )}
+            {compact ? null : <Text dimColor> │ </Text>}
+            {compact ? null : envRow}
           </Box>
         ) : (
           <Box flexDirection="column">

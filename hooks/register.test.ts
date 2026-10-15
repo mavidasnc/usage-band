@@ -136,11 +136,11 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
       ).drawn(),
     )
 
-  // Il Box esterno tiene separatore e barra; largo: un Box per la riga col pulsante,
-  // stretto: un Box per le due righe e uno per la riga dell'ambiente col pulsante
+  // Il Box esterno tiene separatore e barra; largo: un Box per la riga col pulsante e uno per l'ambiente,
+  // stretto: un Box per le due righe, uno per i consumi col pulsante e uno per l'ambiente
   const boxes = (tree: string) => tree.split('"type":"Box"').length - 1
-  expect(boxes(await draw(60))).toBe(3)
-  expect(boxes(await draw(250))).toBe(2)
+  expect(boxes(await draw(60))).toBe(4)
+  expect(boxes(await draw(250))).toBe(3)
 })
 
 test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => {
@@ -292,8 +292,9 @@ test('il pulsante nasconde e rimostra cartella, modello, effort, email e version
   expect(await (await mount()).find({ text: 'Opus 5.5' })).toBeDefined()
 })
 
-// Il motore sotto la band per i test della cache: dati minimi e turn.step che risponde senza chunk
-const stubEngine = (on: Parameters<Parameters<typeof test>[1]>[1]) => {
+// Il motore sotto la band per i test della cache e dei token: dati minimi e turn.step che risponde senza chunk,
+// con i token che `usages` assegna alla richiesta (turno/indice), se ci sono
+const stubEngine = (on: Parameters<Parameters<typeof test>[1]>[1], usages: Record<string, unknown> = {}) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
@@ -301,8 +302,9 @@ const stubEngine = (on: Parameters<Parameters<typeof test>[1]>[1]) => {
   on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('turn.step', async function* (_$, e) {
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], usage: usages[`${e.turnId}/${e.index}`] ?? null } as never
   })
 }
 
@@ -313,8 +315,9 @@ test('la cache mostra i minuti sopra i 10 minuti, poi minuti e secondi, poi scad
   stubEngine(on)
   await $.session.start(START)
 
-  const mount = () =>
-    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  // Un solo disegno montato: è il timer della cache a ridisegnarlo (montarne uno a ogni controllo
+  // moltiplicherebbe i ridisegni di ogni secondo simulato)
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   const step = async (agentId?: string) => {
     for await (const _chunk of $.turn.step({ turnId: 't', index: 0, model: 'opus', messageCount: 1, agentId } as never)) {
       // nessun chunk atteso
@@ -322,27 +325,26 @@ test('la cache mostra i minuti sopra i 10 minuti, poi minuti e secondi, poi scad
   }
 
   // Prima della prima richiesta la scadenza non è nota
-  expect(await (await mount()).find({ text: /cache n\/d/ })).toBeDefined()
+  expect(await ui.find({ text: /cache n\/d/ })).toBeDefined()
 
   // Subito dopo una richiesta: un'ora piena, in minuti e in verde
   await step()
-  const fresh = await mount()
-  expect(await fresh.find({ text: /cache 60m/ })).toBeDefined()
-  expect(JSON.stringify(await fresh.drawn())).toContain('"success"')
+  expect(await ui.find({ text: /cache 60m/ })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).toContain('"success"')
 
   // A 10 minuti esatti passa a minuti e secondi, poi scende di secondo in secondo, in rosso sotto i 6 minuti
   await clock.advance(50 * 60_000)
-  expect(await (await mount()).find({ text: /cache 10:00/ })).toBeDefined()
+  expect(await ui.find({ text: /cache 10:00/ })).toBeDefined()
   await clock.advance(1000)
-  expect(await (await mount()).find({ text: /cache 9:59/ })).toBeDefined()
+  expect(await ui.find({ text: /cache 9:59/ })).toBeDefined()
 
   // La richiesta di un subagente non rinnova la cache del thread principale
   await step('a1')
-  expect(await (await mount()).find({ text: /cache 9:59/ })).toBeDefined()
+  expect(await ui.find({ text: /cache 9:59/ })).toBeDefined()
 
   // Allo scadere
   await clock.advance(10 * 60_000)
-  expect(await (await mount()).find({ text: /cache scaduta/ })).toBeDefined()
+  expect(await ui.find({ text: /cache scaduta/ })).toBeDefined()
 })
 
 test('la durata della cache viene dalle variabili di ambiente e dal cambio di modello', async ($, on) => {
@@ -375,4 +377,104 @@ test('con la cache disattivata la voce non compare', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect(await ui.find({ text: /ctx/ })).toBeDefined()
   expect(await ui.find({ text: /cache/ })).toBeUndefined()
+})
+
+// Un prompt scritto dalla persona: prompt.submit dal terminale, poi il turno che lo esegue
+const prompt = async ($: Parameters<Parameters<typeof test>[1]>[0], text: string, turnId: string) => {
+  await $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false } as never)
+  await $.turn.start({ text, turnId } as never)
+}
+
+// Una richiesta al modello con i suoi token, del loop principale o di un subagente
+const usage = (input: number, output: number, cacheRead: number, cacheWrite = 0) => ({
+  input_tokens: input,
+  output_tokens: output,
+  cache_read_input_tokens: cacheRead,
+  cache_creation_input_tokens: cacheWrite,
+  model: 'opus',
+})
+
+test("i token dell'ultima operazione sommano richieste e subagenti, col dettaglio al clic", async ($, on) => {
+  // Ogni richiesta risponde con i token che il test le assegna, in base al suo turno
+  const usages: Record<string, ReturnType<typeof usage>> = {}
+  stubEngine(on, usages)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  await $.session.start(START)
+
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })
+  const step = async (turnId: string, index: number, agentId?: string) => {
+    for await (const _chunk of $.turn.step({ turnId, index, model: 'opus', messageCount: 1, agentId } as never)) {
+      // nessun chunk atteso
+    }
+  }
+
+  // Prima di un prompt la voce non c'è
+  expect(await (await mount()).find({ text: /tkn/ })).toBeUndefined()
+
+  // Un prompt: due richieste del loop principale e un subagente con la sua richiesta
+  await prompt($, 'fai qualcosa', 't1')
+  usages['t1/0'] = usage(500, 300, 10_000, 200)
+  usages['t1/1'] = usage(42, 0, 0)
+  usages['s1/0'] = usage(1000, 400, 1_000_000)
+  await step('t1', 0)
+  await $.agent.spawn({ prompt: 'cerca', description: 'cerca', subagentType: 'Explore', parentModel: 'opus', background: false, fork: false } as never)
+  await step('s1', 0, 'a1')
+  await step('t1', 1)
+
+  // Totale compatto: 500+300+10000+200 + 42 + 1000+400+1000000 = 1012442 → 1.01M
+  const ui = await mount()
+  expect(await ui.find({ text: /1\.01M/ })).toBeDefined()
+
+  // Clic sulla scritta: ingresso 500+200+42+1000, uscita 300+400, letti 1010000, agenti 1001400
+  await ui.press({ key: 'tokens' })
+  expect(await (await mount()).find({ text: /↑1\.7k ↓700 ♺ 1\.01M \(∴1\.00M\)/ })).toBeDefined()
+
+  // La notifica di un agente in background arriva con testo ma non è un prompt della persona: continua l'operazione
+  await $.prompt.submit({ text: 'resoconto agente', origin: { kind: 'task-notification' }, wait: false } as never)
+  await $.turn.start({ text: 'resoconto agente', turnId: 't2' } as never)
+  usages['t2/0'] = usage(8, 0, 0)
+  await step('t2', 0)
+  expect(await (await mount()).find({ text: /↑1\.8k/ })).toBeDefined()
+
+  // Un nuovo prompt riparte da zero e il subagente dell'operazione precedente non lo tocca
+  await prompt($, 'altro', 't3')
+  usages['t3/0'] = usage(842, 0, 0)
+  usages['s1/1'] = usage(5000, 0, 0)
+  await step('t3', 0)
+  await step('s1', 1, 'a1')
+  const next = await mount()
+  expect(await next.find({ text: /↑842 ↓0 ♺ 0 \(∴0\)/ })).toBeDefined()
+
+  // Il pulsante dei dettagli nasconde anche i token
+  await next.press({ key: 'details' })
+  expect(await (await mount()).find({ text: /tkn/ })).toBeUndefined()
+})
+
+test("un subagente di cui il mod non ha visto lo spawn conta comunque per l'operazione in corso", async ($, on) => {
+  const usages: Record<string, ReturnType<typeof usage>> = {}
+  stubEngine(on, usages)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  await $.session.start(START)
+
+  const step = async (turnId: string, index: number, agentId?: string) => {
+    for await (const _chunk of $.turn.step({ turnId, index, model: 'opus', messageCount: 1, agentId } as never)) {
+      // nessun chunk atteso
+    }
+  }
+
+  await prompt($, 'fai qualcosa', 't1')
+  usages['t1/0'] = usage(100, 10, 0)
+  usages['s1/0'] = usage(200, 20, 0)
+  usages['s2/0'] = usage(300, 30, 0)
+  await step('t1', 0)
+  // Un subagente che apre il suo turno senza spawn ascoltato, e uno mai visto prima della sua richiesta
+  await $.turn.start({ text: 'cerca', turnId: 's1', agentId: 'b1' } as never)
+  await step('s1', 0, 'b1')
+  await step('s2', 0, 'b2')
+
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })
+  await ui.press({ key: 'tokens' })
+  expect(await (await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })).find({ text: /↑600 ↓60 ♺ 0 \(∴550\)/ })).toBeDefined()
 })

@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.9.0] - 2026-10-15
+
+### Aggiunto
+- A sinistra della cartella, i token dell'ultima operazione: l'ultimo prompt con tutte le richieste in cui si spezza, i subagenti che lancia (anche annidati) e l'eventuale compattazione. Il numero cresce in diretta mentre Claude lavora. Formato compatto (predefinito) col solo totale (`tkn 245.3k`); un clic sull'intera voce passa al dettaglio (`tkn ↑12.4k ↓1.8k ♺ 231.1k (∴8.1k)`: ingresso, che comprende anche i token scritti in cache, uscita, letti dalla cache e, tra parentesi, la parte dei subagenti, già inclusa negli altri) e viceversa. Un subagente conta per l'operazione in corso quando apre il suo turno, anche se il mod non ne ha visto la creazione. Solo un prompt scritto dalla persona (terminale, Remote Control o SDK, esclusi i comandi slash) azzera il conteggio: le notifiche dei subagenti in background e le altre ripartenze continuano l'operazione, e i subagenti di un'operazione precedente non toccano quella nuova. `♺` somma le letture dalla cache di ogni richiesta dell'operazione: ogni richiesta rilegge il contesto, quindi cresce in fretta. La voce si nasconde col pulsante `[◂]` insieme agli altri dettagli e resta dopo `/clear`.
+
 ## [0.8.0] - 2026-10-15
 
 ### Aggiunto
