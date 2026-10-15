@@ -20,8 +20,7 @@ L'immagine è un'illustrazione con valori di esempio.
   (lo stesso di `/cost`, a prezzo di listino): con un abbonamento è indicativo, non una spesa.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
 - **modello**: il nome leggibile del modello in uso (`Opus 5.5`, non `claude-opus-5-5`), in arancio;
-  con `opusplan` è seguito da ` (P)` (`Sonnet 5.5 (P)`). Durante un turno mostra il modello della richiesta in corso,
-  quindi in plan mode con opusplan `Opus 5.5 (P)`.
+  durante un turno mostra il modello della richiesta in corso (con `opusplan` in plan mode, ad esempio, `Opus 5.5`).
 - **effort**: l'effort in uso, solo il livello (`low`, `medium`, `high`, `xhigh`, `max`), in viola. Compare dopo il primo prompt
   (dalle richieste al modello e, a fine turno, dall'evento `Stop`) e solo per i modelli che hanno un effort.
 - **email**: l'account corrente, in azzurro, ricavata all'avvio con `claude auth status`

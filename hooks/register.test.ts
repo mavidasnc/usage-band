@@ -492,28 +492,6 @@ test("un subagente di cui il mod non ha visto lo spawn conta comunque per l'oper
   expect(await (await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })).find({ text: /↑600 ↓60 ♺ 0 0% \(∴550\)$/ })).toBeDefined()
 })
 
-test('con opusplan il modello effettivo è seguito da (P), che sparisce cambiando modello', async ($, on) => {
-  mock.clock(on)
-  mock.env(on, {})
-  stubEngine(on)
-  // Impostazioni di avvio con opusplan; la band aggiunge (P) al modello effettivo
-  on('settings.read', () => ({ value: { model: 'opusplan' } }))
-  on('classic.PostModelSwitch', () => ({}))
-  await $.session.start(START)
-
-  const mount = () =>
-    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
-  expect(await (await mount()).find({ text: /\(P\)/ })).toBeDefined()
-
-  // /model opus: l'alias chiesto non è più opusplan
-  await $.classic.PostModelSwitch({ requested_model: 'opus', cache_ttl: '5m' } as never)
-  expect(await (await mount()).find({ text: /\(P\)/ })).toBeUndefined()
-
-  // /model opusplan: torna il segno
-  await $.classic.PostModelSwitch({ requested_model: 'opusplan', cache_ttl: '5m' } as never)
-  expect(await (await mount()).find({ text: /\(P\)/ })).toBeDefined()
-})
-
 test('durante un turno il modello è quello della richiesta in corso, a turno finito torna quello della sessione', async ($, on) => {
   mock.clock(on)
   mock.env(on, {})

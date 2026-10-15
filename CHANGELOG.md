@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.11.1] - 2026-10-15
+
+### Rimosso
+- Il segno ` (P)` accanto al modello con `opusplan`: dipendeva da `settings.json` e `ANTHROPIC_MODEL` e compariva anche con un altro modello scelto con `--model` all'avvio, che il mod non vede. La barra mostra il modello in uso al momento. Soluzione da studiare in `TODO.md`.
+
 ## [0.11.0] - 2026-10-15
 
 ### Aggiunto
