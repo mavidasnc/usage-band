@@ -27,6 +27,10 @@ const lastRequestAt = atom({ plugin: 'usage-band', key: 'lastRequestAt' } as con
 // Durata della cache del prompt riportata dal motore nei cambi di modello; null finché non arriva
 const cacheTtl = atom({ plugin: 'usage-band', key: 'cacheTtl' } as const, null)
 
+// Modello dell'ultima richiesta del loop principale nel turno in corso, come lo risolve il motore (con opusplan Opus in plan mode,
+// Sonnet altrimenti); null fuori da un turno o prima della prima richiesta
+const stepModel = atom({ plugin: 'usage-band', key: 'stepModel' } as const, null)
+
 // Token dell'ultima operazione (l'ultimo prompt con tutte le sue richieste e i suoi subagenti); null prima del primo prompt
 const operation = atom({ plugin: 'usage-band', key: 'operation' } as const, null)
 
@@ -356,6 +360,10 @@ export const register: Register = on => {
   // Il turno del loop principale che segue un prompt della persona apre una nuova operazione con i token a zero;
   // gli altri (notifica di un agente in background, ripartenza senza testo) continuano quella in corso
   on('turn.start', async ($, e, next) => {
+    // Un turno nuovo del loop principale: il modello della richiesta precedente non vale più finché non arriva la prima
+    if (e.agentId === undefined) {
+      await update($, stepModel, () => null)
+    }
     if (e.agentId === undefined && isUserPromptPending) {
       isUserPromptPending = false
       lastOperation = { id: e.turnId, input: 0, output: 0, cacheRead: 0, agents: 0 }
@@ -397,6 +405,7 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       await update($, effort, () => e.effort ?? null)
+      await update($, stepModel, () => e.model)
       // la richiesta rinnova la cache del prompt: il countdown riparte da qui
       const now = await $.clock.now().catch(() => null)
       if (now !== null) {
@@ -474,7 +483,9 @@ export const register: Register = on => {
     }
     const folder = folderLabel(await $.session.cwd())
     // Con opusplan il modello effettivo è seguito da " (P)"
-    const model = modelLabel(await $.session.model()) + ((await isOpusPlan($).catch(() => false)) ? ' (P)' : '')
+    // Durante un turno vale il modello della richiesta in corso (con opusplan cambia col plan mode), altrimenti quello della sessione
+    const current = (e.props.isWorking ? await read($, stepModel) : null) ?? (await $.session.model())
+    const model = modelLabel(current) + ((await isOpusPlan($).catch(() => false)) ? ' (P)' : '')
     const modVersion = (await read($, version)) ?? lastVersion
     const level = await read($, effort)
     const account = (await read($, email)) ?? lastEmail

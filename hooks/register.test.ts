@@ -500,3 +500,28 @@ test('con opusplan il modello effettivo è seguito da (P), che sparisce cambiand
   await $.classic.PostModelSwitch({ requested_model: 'opusplan', cache_ttl: '5m' } as never)
   expect(await (await mount()).find({ text: /\(P\)/ })).toBeDefined()
 })
+
+test('durante un turno il modello è quello della richiesta in corso, a turno finito torna quello della sessione', async ($, on) => {
+  mock.clock(on)
+  mock.env(on, {})
+  stubEngine(on)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  await $.session.start(START)
+
+  const mount = (isWorking: boolean) =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: { ...(PROPS as object), isWorking } as never })
+
+  // Con opusplan in plan mode il motore risolve la richiesta su un altro modello rispetto a quello della sessione (opus)
+  await $.turn.start({ text: 'piano', turnId: 't1' } as never)
+  for await (const _chunk of $.turn.step({ turnId: 't1', index: 0, model: 'claude-sonnet-5-5', messageCount: 1 } as never)) {
+    // nessun chunk atteso
+  }
+  expect(await (await mount(true)).find({ text: /Sonnet 5\.5/ })).toBeDefined()
+
+  // A turno finito vale di nuovo il modello della sessione
+  expect(await (await mount(false)).find({ text: /Sonnet 5\.5/ })).toBeUndefined()
+
+  // Un turno nuovo, prima della sua prima richiesta, non mostra il modello del turno precedente
+  await $.turn.start({ text: 'altro', turnId: 't2' } as never)
+  expect(await (await mount(true)).find({ text: /Sonnet 5\.5/ })).toBeUndefined()
+})

@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.10.1] - 2026-10-15
+
+### Corretto
+- Con `opusplan` in plan mode, durante il turno la barra mostra `Opus 5.5 (P)` invece di `Sonnet 5.5 (P)`. Mentre Claude lavora la barra mostra il modello dell'ultima richiesta del thread principale, scelto dal motore a ogni richiesta; a turno finito torna il modello della sessione. Da fermo in plan mode resta il modello della sessione finché non parte la prima richiesta, perché il mod non conosce la modalità in uso.
+
 ## [0.10.0] - 2026-10-15
 
 ### Aggiunto

@@ -17,6 +17,7 @@ declare module 'claude-code' {
       email: string | null
       version: string | null
       effort: string | number | null
+      stepModel: string | null
       lastRequestAt: number | null
       cacheTtl: '5m' | '1h' | null
       operation: Operation | null
