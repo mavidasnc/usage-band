@@ -293,15 +293,21 @@ test('il pulsante nasconde e rimostra cartella, modello, effort, email e version
 })
 
 // Il motore sotto la band per i test della cache e dei token: dati minimi e turn.step che risponde senza chunk,
-// con i token che `usages` assegna alla richiesta (turno/indice), se ci sono
-const stubEngine = (on: Parameters<Parameters<typeof test>[1]>[1], usages: Record<string, unknown> = {}) => {
+// con i token che `usages` assegna alla richiesta (turno/indice), se ci sono, e il costo della sessione in `cost.usd`, se c'è
+const stubEngine = (
+  on: Parameters<Parameters<typeof test>[1]>[1],
+  usages: Record<string, unknown> = {},
+  cost: { usd?: number } = {},
+) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('session.usage', () => ({
+    value: { startedAt: 0, context: { window: 200000 }, rateLimits: [], ...(cost.usd === undefined ? {} : { cost: { usd: cost.usd } }) },
+  }))
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   on('turn.step', async function* (_$, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], usage: usages[`${e.turnId}/${e.index}`] ?? null } as never
@@ -397,7 +403,9 @@ const usage = (input: number, output: number, cacheRead: number, cacheWrite = 0)
 test("i token dell'ultima operazione sommano richieste e subagenti, col dettaglio al clic", async ($, on) => {
   // Ogni richiesta risponde con i token che il test le assegna, in base al suo turno
   const usages: Record<string, ReturnType<typeof usage>> = {}
-  stubEngine(on, usages)
+  // Costo della sessione: $1.00 quando parte il prompt, poi cresce con le risposte
+  const cost: { usd?: number } = { usd: 1 }
+  stubEngine(on, usages, cost)
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
   await $.session.start(START)
@@ -418,18 +426,21 @@ test("i token dell'ultima operazione sommano richieste e subagenti, col dettagli
   usages['t1/0'] = usage(500, 300, 10_000, 200)
   usages['t1/1'] = usage(42, 0, 0)
   usages['s1/0'] = usage(1000, 400, 1_000_000)
+  cost.usd = 1.1
   await step('t1', 0)
   await $.agent.spawn({ prompt: 'cerca', description: 'cerca', subagentType: 'Explore', parentModel: 'opus', background: false, fork: false } as never)
+  cost.usd = 1.2
   await step('s1', 0, 'a1')
+  cost.usd = 1.25
   await step('t1', 1)
 
-  // Totale compatto: 500+300+10000+200 + 42 + 1000+400+1000000 = 1012442 → 1.01M
+  // Totale compatto: solo i token nuovi, 500+300+200 + 42 + 1000+400 = 2442 → 2.4k, e il costo cresciuto di $0.25
   const ui = await mount()
-  expect(await ui.find({ text: /1\.01M/ })).toBeDefined()
+  expect(await ui.find({ text: /tkn 2\.4k · \$0\.25/ })).toBeDefined()
 
-  // Clic sulla scritta: ingresso 500+200+42+1000, uscita 300+400, letti 1010000, agenti 1001400
+  // Clic sulla scritta: ingresso 500+200+42+1000, uscita 300+400, letti 1010000 (il 100% dell'ingresso, arrotondato), agenti 1001400
   await ui.press({ key: 'tokens' })
-  expect(await (await mount()).find({ text: /↑1\.7k ↓700 ♺ 1\.01M \(∴1\.00M\)/ })).toBeDefined()
+  expect(await (await mount()).find({ text: /↑1\.7k ↓700 ♺ 1\.01M 100% \(∴1\.00M\) · \$0\.25/ })).toBeDefined()
 
   // La notifica di un agente in background arriva con testo ma non è un prompt della persona: continua l'operazione
   await $.prompt.submit({ text: 'resoconto agente', origin: { kind: 'task-notification' }, wait: false } as never)
@@ -442,10 +453,12 @@ test("i token dell'ultima operazione sommano richieste e subagenti, col dettagli
   await prompt($, 'altro', 't3')
   usages['t3/0'] = usage(842, 0, 0)
   usages['s1/1'] = usage(5000, 0, 0)
+  cost.usd = 1.255
   await step('t3', 0)
   await step('s1', 1, 'a1')
   const next = await mount()
-  expect(await next.find({ text: /↑842 ↓0 ♺ 0 \(∴0\)/ })).toBeDefined()
+  // Nessuna lettura dalla cache (riuso 0%) e un costo sotto il centesimo
+  expect(await next.find({ text: /↑842 ↓0 ♺ 0 0% \(∴0\) · <\$0\.01/ })).toBeDefined()
 
   // Il pulsante dei dettagli nasconde anche i token
   await next.press({ key: 'details' })
@@ -476,7 +489,7 @@ test("un subagente di cui il mod non ha visto lo spawn conta comunque per l'oper
 
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })
   await ui.press({ key: 'tokens' })
-  expect(await (await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })).find({ text: /↑600 ↓60 ♺ 0 \(∴550\)/ })).toBeDefined()
+  expect(await (await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })).find({ text: /↑600 ↓60 ♺ 0 0% \(∴550\)$/ })).toBeDefined()
 })
 
 test('con opusplan il modello effettivo è seguito da (P), che sparisce cambiando modello', async ($, on) => {

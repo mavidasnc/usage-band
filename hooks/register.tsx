@@ -126,15 +126,37 @@ const cacheColor = (remainingMs: number, ttlMs: number) =>
 const tokenLabel = (n: number) =>
   n < 1000 ? String(n) : n < 1_000_000 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1_000_000).toFixed(2)}M`
 
-// Totale dell'operazione: la somma di tutto (ingresso, uscita e letti dalla cache; gli agenti sono già dentro)
-const operationTotal = (op: Operation) => op.input + op.output + op.cacheRead
+// Token nuovi dell'operazione: ingresso (comprese le scritture in cache) e uscita. Le letture dalla cache restano fuori:
+// costano una frazione di un token normale e sommate alla pari gonfierebbero il numero di un ordine di grandezza
+const operationTotal = (op: Operation) => op.input + op.output
 
-// Testo della voce token, senza l'etichetta: il totale o il dettaglio (↑ ingresso, ↓ uscita, ♺ letti dalla cache,
-// tra parentesi ∴ la parte dei subagenti, già compresa negli altri)
-const operationText = (op: Operation, detailed: boolean) =>
-  detailed
-    ? `↑${tokenLabel(op.input)} ↓${tokenLabel(op.output)} ♺ ${tokenLabel(op.cacheRead)} (∴${tokenLabel(op.agents)})`
+// Costo in dollari a prezzo di listino: due decimali, sotto il centesimo "<$0.01"
+const costLabel = (usd: number) => (usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`)
+
+// Quota dell'ingresso servita dalla cache, in percentuale intera; null senza ingresso
+const cacheHitRate = (op: Operation) => {
+  const total = op.cacheRead + op.input
+  return total > 0 ? Math.round((op.cacheRead / total) * 100) : null
+}
+
+// Testo della voce token, senza l'etichetta: il totale dei token nuovi o il dettaglio (↑ ingresso, ↓ uscita, ♺ letti dalla cache
+// con la quota di riuso, tra parentesi ∴ la parte dei subagenti, già compresa negli altri); in coda il costo, quando è noto
+const operationText = (op: Operation, detailed: boolean) => {
+  const rate = cacheHitRate(op)
+  const tokens = detailed
+    ? `↑${tokenLabel(op.input)} ↓${tokenLabel(op.output)} ♺ ${tokenLabel(op.cacheRead)}${rate === null ? '' : ` ${rate}%`} (∴${tokenLabel(op.agents)})`
     : tokenLabel(operationTotal(op))
+  return op.cost == null ? tokens : `${tokens} · ${costLabel(op.cost)}`
+}
+
+// Costo della sessione in dollari a prezzo di listino, come lo totalizza /cost; null dove il motore non tiene il conto
+const sessionCost = async ($: EngineInterface) => {
+  try {
+    return (await $.session.usage()).cost?.usd ?? null
+  } catch {
+    return null
+  }
+}
 
 // Ricava dai dati del motore le tre percentuali che la barra mostra
 const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]): Snapshot => {
@@ -204,6 +226,8 @@ const addUsage = async ($: EngineInterface, agentId: string | undefined, usage: 
   }
   const fresh = usage.input_tokens + usage.cache_creation_input_tokens
   const total = fresh + usage.output_tokens + usage.cache_read_input_tokens
+  // Costo dell'operazione: quanto è cresciuto il costo della sessione da quando è iniziata (mai negativo, /clear lo azzera)
+  const usd = await sessionCost($)
   await update($, operation, op => {
     if (!op || op.id !== current.id) {
       return op
@@ -214,6 +238,8 @@ const addUsage = async ($: EngineInterface, agentId: string | undefined, usage: 
       output: op.output + usage.output_tokens,
       cacheRead: op.cacheRead + usage.cache_read_input_tokens,
       agents: op.agents + (agentId === undefined ? 0 : total),
+      // == null: un'operazione salvata prima della 0.11.0 non ha i campi del costo
+      cost: usd === null || op.costStart == null ? (op.cost ?? null) : Math.max(usd - op.costStart, 0),
     }
     return lastOperation
   })
@@ -366,7 +392,8 @@ export const register: Register = on => {
     }
     if (e.agentId === undefined && isUserPromptPending) {
       isUserPromptPending = false
-      lastOperation = { id: e.turnId, input: 0, output: 0, cacheRead: 0, agents: 0 }
+      const costStart = await sessionCost($)
+      lastOperation = { id: e.turnId, input: 0, output: 0, cacheRead: 0, agents: 0, costStart, cost: costStart === null ? null : 0 }
       await update($, operation, () => lastOperation)
     }
     // Il turno di un subagente appartiene all'operazione in corso quando parte: vale anche per un agente

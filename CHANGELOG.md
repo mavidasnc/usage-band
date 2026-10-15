@@ -2,6 +2,16 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.11.0] - 2026-10-15
+
+### Aggiunto
+- Il costo dell'ultima operazione in dollari, in coda alla voce `tkn` sia compatta sia dettagliata (`tkn 28.7k · $0.54`). È la crescita del costo della sessione calcolato da Claude Code (lo stesso di `/cost`, a prezzo di listino) da quando è iniziato il prompt: comprende subagenti e compattazione e usa i prezzi giusti per ogni modello. Con un abbonamento è un valore indicativo. Sotto il centesimo compare `<$0.01`.
+- Nel dettaglio, dopo i token letti dalla cache, la quota dell'ingresso servita dalla cache (`♺ 939.6k 97%`): un valore basso segnala una cache scaduta o invalidata.
+
+### Modificato
+- Il totale compatto conta solo i token nuovi, ingresso e uscita: le letture dalla cache costano una frazione di un token normale e sommate alla pari gonfiavano il numero di circa nove volte. Restano nel dettaglio (`♺`).
+- Il README descrive la cache e i token e mostra la versione nel formato `vX.Y.Z`.
+
 ## [0.10.1] - 2026-10-15
 
 ### Corretto

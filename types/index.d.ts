@@ -5,8 +5,17 @@ export type Limit = { percent: number; resetsAt?: string }
 export type Snapshot = { context?: number; fiveHour?: Limit; sevenDay?: Limit }
 
 // Token di un'operazione (un prompt con le sue richieste e i suoi subagenti): ingresso nuovo (non in cache e scritto in cache),
-// uscita, letti dalla cache e la parte dei subagenti, già compresa nei tre precedenti
-export type Operation = { id: string; input: number; output: number; cacheRead: number; agents: number }
+// uscita, letti dalla cache e la parte dei subagenti, già compresa nei tre precedenti; costo della sessione all'inizio
+// dell'operazione e costo dell'operazione in dollari a prezzo di listino (null dove il motore non tiene il conto)
+export type Operation = {
+  id: string
+  input: number
+  output: number
+  cacheRead: number
+  agents: number
+  costStart: number | null
+  cost: number | null
+}
 
 declare module 'claude-code' {
   interface PluginState {
