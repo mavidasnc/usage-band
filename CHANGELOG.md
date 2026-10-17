@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.11.2] - 2026-10-17
+
+### Corretto
+- I token e il costo dell'operazione contano anche le skill e i comandi slash che avviano un turno del modello: prima venivano scartati e, se una sessione partiva da una skill, la voce `tkn` non compariva finché non si scriveva un prompt normale. I comandi locali (`/clear`, `/usage-band`) continuano a non aprire un'operazione.
+
 ## [0.11.1] - 2026-10-15
 
 ### Rimosso

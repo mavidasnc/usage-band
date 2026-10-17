@@ -359,10 +359,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Un prompt della persona (terminale, Remote Control o SDK), non un comando slash: il prossimo turno
-  // del loop principale aprirà una nuova operazione. Notifiche di task e agenti, loop e plugin non la aprono
+  // Un prompt della persona (terminale, Remote Control o SDK), anche una skill o un comando slash che avvia un turno:
+  // il prossimo turno del loop principale aprirà una nuova operazione. I comandi locali (/clear) e quelli in fork
+  // non generano prompt.submit. Notifiche di task e agenti, loop e plugin non la aprono
   on('prompt.submit', async ($, e, next) => {
-    if (USER_ORIGINS.includes(e.origin.kind) && !e.command && !e.isMeta) {
+    if (USER_ORIGINS.includes(e.origin.kind) && !e.isMeta) {
       isUserPromptPending = true
     }
 
