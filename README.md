@@ -18,6 +18,9 @@ L'immagine è un'illustrazione con valori di esempio.
   (`tkn ↑27.8k ↓875 ♺ 939.6k 97% (∴37.6k) · $0.54`): ingresso, uscita, letti dalla cache con la quota di riuso,
   tra parentesi la parte dei subagenti (già compresa negli altri). Il costo è quello che calcola Claude Code
   (lo stesso di `/cost`, a prezzo di listino): con un abbonamento è indicativo, non una spesa.
+- **costo della sessione**: subito a destra di `tkn`, solo il valore in dollari (`$12.30`), in rosa. È il costo dell'intera
+  sessione come lo conta Claude Code (lo stesso di `/cost`): dopo `--continue` o `--resume` comprende anche il lavoro precedente,
+  `/clear` lo azzera. Non è cliccabile e compare dalla prima richiesta.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
 - **modello**: il nome leggibile del modello in uso (`Opus 5.5`, non `claude-opus-5-5`), in arancio;
   durante un turno mostra il modello della richiesta in corso (con `opusplan` in plan mode, ad esempio, `Opus 5.5`).

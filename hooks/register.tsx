@@ -505,6 +505,9 @@ export const register: Register = on => {
     const cache = await cacheState($).catch(() => null)
     const tokens = (await read($, operation)) ?? lastOperation
     const detailed = (await read($, isTokenDetailed)) || lastTokenDetailed
+    // Costo dell'intera sessione: nullo dove il motore non lo conta, assente finché non c'è una richiesta pagata
+    const sessionUsd = await sessionCost($)
+    const sessionText = sessionUsd !== null && sessionUsd > 0 ? costLabel(sessionUsd) : null
     const { Box, Button, Text } = $.ui.resolve(e)
 
     // Un segmento: etichetta, barra e percentuale colorate, reset opzionale
@@ -559,13 +562,18 @@ export const register: Register = on => {
       />
     ) : null
 
-    // Riga dell'ambiente: token, cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione del mod (verde acqua);
-    // token, effort, email e versione compaiono quando sono noti
+    // Costo della sessione, subito dopo i token: solo il valore, non cliccabile, in rosa (bashBorder) per distinguerlo dalle altre voci
+    const sessionItem = sessionText ? <Text color="bashBorder">{sessionText}</Text> : null
+
+    // Riga dell'ambiente: token, costo della sessione, cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione
+    // del mod (verde acqua); token, costo, effort, email e versione compaiono quando sono noti
     const envRow = (
       <Box>
         {tokenItem}
         <Text>
           {tokens ? <Text dimColor> │ </Text> : null}
+          {sessionItem}
+          {sessionItem ? <Text dimColor> │ </Text> : null}
           <Text color="warning">{folder}</Text>
           <Text dimColor> │ </Text>
           <Text color="claude">{model}</Text>
@@ -609,7 +617,7 @@ export const register: Register = on => {
     // Compatta la riga dell'ambiente sparisce e restano consumi e pulsante (" │ [▸]")
     const envLength = compact
       ? 0
-      : [tokens && `tkn ${operationText(tokens, detailed)}`, folder, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
+      : [tokens && `tkn ${operationText(tokens, detailed)}`, sessionText, folder, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
           .filter(Boolean)
           .join(' │ ').length + 3
     const isWide = compact || USAGE_ROW_WIDTH + 6 + envLength <= (e.viewport?.columns ?? 0)

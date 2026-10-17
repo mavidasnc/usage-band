@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.12.0] - 2026-10-17
+
+### Aggiunto
+- Il costo dell'intera sessione in dollari, subito a destra di `tkn` e in rosa (`$12.30`), senza etichetta e non cliccabile. È il conto di Claude Code (lo stesso di `/cost`, a prezzo di listino): dopo `--continue` o `--resume` comprende anche il lavoro precedente, `/clear` lo azzera. Compare dalla prima richiesta pagata e solo dove il motore tiene il conto.
+
 ## [0.11.2] - 2026-10-17
 
 ### Corretto

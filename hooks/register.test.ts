@@ -418,8 +418,9 @@ test("i token dell'ultima operazione sommano richieste e subagenti, col dettagli
     }
   }
 
-  // Prima di un prompt la voce non c'è
+  // Prima di un prompt la voce dei token non c'è, quella del costo della sessione sì (la sessione ha già $1.00)
   expect(await (await mount()).find({ text: /tkn/ })).toBeUndefined()
+  expect(await (await mount()).find({ text: /^\$1\.00$/ })).toBeDefined()
 
   // Un prompt: due richieste del loop principale e un subagente con la sua richiesta
   await prompt($, 'fai qualcosa', 't1')
@@ -437,6 +438,8 @@ test("i token dell'ultima operazione sommano richieste e subagenti, col dettagli
   // Totale compatto: solo i token nuovi, 500+300+200 + 42 + 1000+400 = 2442 → 2.4k, e il costo cresciuto di $0.25
   const ui = await mount()
   expect(await ui.find({ text: /tkn 2\.4k · \$0\.25/ })).toBeDefined()
+  // Il costo dell'intera sessione sta a destra dei token, senza etichetta e non cliccabile
+  expect(await ui.find({ text: /^\$1\.25$/ })).toBeDefined()
 
   // Clic sulla scritta: ingresso 500+200+42+1000, uscita 300+400, letti 1010000 (il 100% dell'ingresso, arrotondato), agenti 1001400
   await ui.press({ key: 'tokens' })
@@ -463,6 +466,26 @@ test("i token dell'ultima operazione sommano richieste e subagenti, col dettagli
   // Il pulsante dei dettagli nasconde anche i token
   await next.press({ key: 'details' })
   expect(await (await mount()).find({ text: /tkn/ })).toBeUndefined()
+})
+
+test('senza costo della sessione, o a zero, la voce del costo non compare', async ($, on) => {
+  const cost: { usd?: number } = {}
+  stubEngine(on, {}, cost)
+  await $.session.start(START)
+
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS, viewport: { columns: 400, rows: 24 } })
+
+  // Il motore non tiene il conto: nessuna voce
+  expect(await (await mount()).find({ text: /\$/ })).toBeUndefined()
+
+  // Un conto a zero (nessuna richiesta pagata) non mostra "<$0.01"
+  cost.usd = 0
+  expect(await (await mount()).find({ text: /\$/ })).toBeUndefined()
+
+  // Dalla prima spesa la voce compare
+  cost.usd = 0.5
+  expect(await (await mount()).find({ text: /^\$0\.50$/ })).toBeDefined()
 })
 
 test("un subagente di cui il mod non ha visto lo spawn conta comunque per l'operazione in corso", async ($, on) => {
