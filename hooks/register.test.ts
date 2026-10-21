@@ -136,11 +136,11 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
       ).drawn(),
     )
 
-  // Il Box esterno tiene separatore e barra; largo: un Box per la riga col pulsante e uno per l'ambiente,
-  // stretto: un Box per le due righe, uno per i consumi col pulsante e uno per l'ambiente
+  // Il Box esterno tiene separatore e barra; largo: un Box per la riga col pulsante, uno per i consumi e uno per l'ambiente,
+  // stretto: un Box per le due righe, uno per i consumi col pulsante, uno per i consumi e uno per l'ambiente
   const boxes = (tree: string) => tree.split('"type":"Box"').length - 1
-  expect(boxes(await draw(60))).toBe(4)
-  expect(boxes(await draw(250))).toBe(3)
+  expect(boxes(await draw(60))).toBe(5)
+  expect(boxes(await draw(250))).toBe(4)
 })
 
 test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => {
@@ -586,4 +586,58 @@ test('durante un turno il modello è quello della richiesta in corso, a turno fi
   // Un turno nuovo, prima della sua prima richiesta, non mostra il modello del turno precedente
   await $.turn.start({ text: 'altro', turnId: 't2' } as never)
   expect(await (await mount(true)).find({ text: /Sonnet 5\.5/ })).toBeUndefined()
+})
+
+test('il clic sul contesto scrive nel prompt vuoto la richiesta di valutare /compact, senza inviarla', async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  // La casella del prompt del motore: la bozza che contiene, cosa le viene scritto, se qualcuno invia, gli avvisi mostrati
+  let draft = 'sto scrivendo'
+  const fills: { text: string; mode: string }[] = []
+  const toasts: string[] = []
+  let submitted = false
+  on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
+  on('prompt.fill', (_$, e) => {
+    fills.push({ text: e.text, mode: e.mode })
+    return { isFilled: true }
+  })
+  on('prompt.submit', (_$, e) => {
+    submitted = true
+    return { text: e.text }
+  })
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  // Il segmento resta uguale a prima: etichetta, barra e percentuale
+  expect(await ui.find({ text: /ctx .* 92%/ })).toBeDefined()
+
+  // Con una bozza nella casella non scrive nulla e avvisa
+  await ui.press({ key: 'context' })
+  expect(fills).toEqual([])
+  expect(toasts).toHaveLength(1)
+
+  // Con la casella vuota (o solo spazi) scrive la richiesta
+  draft = '  '
+  await ui.press({ key: 'context' })
+  expect(fills).toEqual([
+    {
+      text:
+        'Il tuo contesto è al 92%, valuta se è necessario eseguire il comando /compact. ' +
+        'Se sì scrivimi il comando con le indicazioni su cosa mantenere e cosa pulire e, se serve, ' +
+        'scrivi nella memoria e/o nello scratchpad ciò che ti serve per proseguire',
+      mode: 'replace',
+    },
+  ])
+  expect(submitted).toBe(false)
 })

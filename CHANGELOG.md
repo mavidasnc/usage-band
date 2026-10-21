@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.14.0] - 2026-10-21
+
+### Aggiunto
+- Un clic su `ctx` scrive nel prompt, senza inviarla, la richiesta di valutare `/compact` con la percentuale di contesto attuale: Claude indica se serve, con cosa mantenere e cosa pulire, e salva in memoria o nello scratchpad ciò che gli serve per proseguire. Il testo viene scritto solo se il prompt è vuoto; altrimenti compare un avviso e la bozza resta com'è. Con il contesto `n/d` la voce non è cliccabile.
+
 ## [0.13.0] - 2026-10-21
 
 ### Aggiunto

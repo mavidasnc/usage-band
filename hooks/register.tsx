@@ -61,6 +61,12 @@ const gauge = (percent: number) => {
   return '█'.repeat(filled) + '░'.repeat(BAR_WIDTH - filled)
 }
 
+// Prompt che il clic sul contesto scrive nella casella, con la percentuale intera
+const compactPrompt = (percent: number) =>
+  `Il tuo contesto è al ${Math.round(percent)}%, valuta se è necessario eseguire il comando /compact. ` +
+  'Se sì scrivimi il comando con le indicazioni su cosa mantenere e cosa pulire e, se serve, ' +
+  'scrivi nella memoria e/o nello scratchpad ciò che ti serve per proseguire'
+
 const pad = (n: number) => String(n).padStart(2, '0')
 
 // Orario di reset: solo HH:MM se è oggi, altrimenti giorno abbreviato + HH:MM
@@ -628,17 +634,48 @@ export const register: Register = on => {
         </Text>
       )
 
-    // Riga dei consumi: 5h, 7g, contesto e cache
+    // Contesto: se la percentuale è nota l'intero segmento è un pulsante che scrive nel prompt, senza inviarlo, la richiesta
+    // di valutare /compact, solo se la casella è vuota (altrimenti un avviso, per non perdere ciò che si sta scrivendo);
+    // con n/d resta testo semplice
+    const contextPercent = data?.context
+    const contextItem =
+      contextPercent === undefined ? (
+        segment('ctx', contextPercent)
+      ) : (
+        <Button
+          key="context"
+          label={`ctx ${Math.round(contextPercent)}%`}
+          plain
+          onPress={async () => {
+            const { text } = await $.prompt.read()
+            if (text.trim() !== '') {
+              $.ui.toast('Svuota il prompt per inserire la richiesta di /compact')
+              return
+            }
+            await $.prompt.fill({ text: compactPrompt(contextPercent) })
+          }}
+        >
+          {segment('ctx', contextPercent)}
+        </Button>
+      )
+
+    // Riga dei consumi: 5h, 7g, contesto e cache. È un Box perché il contesto è un pulsante, che non può stare dentro un Text
     const usageRow = (
-      <Text>
-        {segment('5h', data?.fiveHour?.percent, data?.fiveHour?.resetsAt)}
-        <Text dimColor> │ </Text>
-        {segment('7g', data?.sevenDay?.percent, data?.sevenDay?.resetsAt)}
-        <Text dimColor> │ </Text>
-        {segment('ctx', data?.context)}
-        {cacheSegment ? <Text dimColor> │ </Text> : null}
-        {cacheSegment}
-      </Text>
+      <Box>
+        <Text>
+          {segment('5h', data?.fiveHour?.percent, data?.fiveHour?.resetsAt)}
+          <Text dimColor> │ </Text>
+          {segment('7g', data?.sevenDay?.percent, data?.sevenDay?.resetsAt)}
+          <Text dimColor> │ </Text>
+        </Text>
+        {contextItem}
+        {cacheSegment ? (
+          <Text>
+            <Text dimColor> │ </Text>
+            {cacheSegment}
+          </Text>
+        ) : null}
+      </Box>
     )
 
     // Token dell'ultima operazione, in testa alla riga dell'ambiente: l'intera voce ("tkn" e valori) è un pulsante che alterna
@@ -698,10 +735,8 @@ export const register: Register = on => {
     // Consumi e pulsante, sempre insieme sulla prima riga e separati da una pipe
     const usageWithToggle = (
       <Box>
-        <Text>
-          {usageRow}
-          <Text dimColor> │ </Text>
-        </Text>
+        {usageRow}
+        <Text dimColor> │ </Text>
         {toggle}
       </Box>
     )
@@ -723,10 +758,8 @@ export const register: Register = on => {
         {separator}
         {isWide ? (
           <Box>
-            <Text>
-              {usageRow}
-              <Text dimColor> │ </Text>
-            </Text>
+            {usageRow}
+            <Text dimColor> │ </Text>
             {toggle}
             {compact ? null : <Text dimColor> │ </Text>}
             {compact ? null : envRow}

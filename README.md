@@ -9,6 +9,8 @@ L'immagine è un'illustrazione con valori di esempio.
 - **5h**: percentuale usata della finestra di limite a 5 ore, con orario di reset.
 - **7g**: percentuale usata del limite settimanale, con giorno e orario di reset.
 - **ctx**: percentuale di riempimento della finestra di contesto della conversazione.
+  Un clic, a prompt vuoto, vi scrive (senza inviarla) la richiesta di valutare `/compact` con la percentuale attuale;
+  se il prompt contiene già del testo non lo tocca e mostra un avviso.
 - **cache**: tempo che resta prima che scada la cache del prompt, contato dall'ultima richiesta del thread principale:
   in minuti (`cache 42m`) sopra i 10 minuti, poi in minuti e secondi (`cache 9:58`), `cache scaduta` a zero.
   Verde, giallo sotto il 25% della durata, rosso sotto il 10%. La durata (5 minuti o 1 ora) viene dal motore al cambio di modello,
