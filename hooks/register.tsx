@@ -24,9 +24,6 @@ const effort = atom({ plugin: 'usage-band', key: 'effort' } as const, null)
 // Istante, in millisecondi di $.clock.now(), dell'ultima richiesta al modello del loop principale: rinnova la cache del prompt
 const lastRequestAt = atom({ plugin: 'usage-band', key: 'lastRequestAt' } as const, null)
 
-// Durata della cache del prompt riportata dal motore nei cambi di modello; null finché non arriva
-const cacheTtl = atom({ plugin: 'usage-band', key: 'cacheTtl' } as const, null)
-
 // Modello dell'ultima richiesta del loop principale nel turno in corso, come lo risolve il motore (con opusplan Opus in plan mode,
 // Sonnet altrimenti); null fuori da un turno o prima della prima richiesta
 const stepModel = atom({ plugin: 'usage-band', key: 'stepModel' } as const, null)
@@ -278,6 +275,29 @@ const readTranscript = async ($: EngineInterface, sessionId: string) => {
   return null
 }
 
+// Email dell'account dal file di configurazione di Claude Code (oauthAccount.emailAddress), dove il login la registra:
+// <CLAUDE_CONFIG_DIR>/.claude.json, altrimenti <home>/.claude.json; null se il file manca, è troppo grande o non la contiene
+const readConfigEmail = async ($: EngineInterface) => {
+  try {
+    const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
+    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'))
+    const base = configDir || home
+    if (!base) {
+      return null
+    }
+    const path = `${base}/.claude.json`
+    const stat = await $.fs.stat(path).catch(() => null)
+    if (stat?.kind !== 'file' || stat.size >= FS_READ_LIMIT) {
+      return null
+    }
+    const found = JSON.parse(await $.fs.read(path))?.oauthAccount?.emailAddress
+    return typeof found === 'string' && found ? found : null
+  } catch {
+    // file non leggibile o non JSON: l'email resta non nota
+    return null
+  }
+}
+
 // Istante, in millisecondi, dell'ultima risposta del thread principale nel transcript: le righe dei subagenti
 // (isSidechain) e le risposte sintetiche del motore non contano; null se non c'è o il transcript non si legge
 const readLastResponseAt = async ($: EngineInterface, sessionId: string) => {
@@ -321,7 +341,7 @@ const transcriptResponseAt = async ($: EngineInterface, wait: boolean) => {
 // Stato corrente della cache: durata in uso e millisecondi residui (null prima della prima richiesta), oppure null se disattivata.
 // Senza una richiesta in questa sessione vale l'ultima risposta del transcript (conversazione ripresa); wait come per transcriptResponseAt
 const cacheState = async ($: EngineInterface, wait = true) => {
-  const ttl = (await read($, cacheTtl)) ?? envCacheTtl ?? '1h'
+  const ttl = envCacheTtl ?? '1h'
   if (ttl === 'off') {
     return null
   }
@@ -352,7 +372,7 @@ const readEnvCacheTtl = async ($: EngineInterface): Promise<typeof envCacheTtl> 
 
 // Ridisegna la barra se l'etichetta della cache è cambiata e si risveglia quando cambierà di nuovo:
 // al prossimo minuto sopra i 10 minuti, al prossimo secondo sotto; fermo con n/d, scaduta o cache disattivata.
-// Va richiamata a ogni richiesta e a ogni cambio di durata
+// Va richiamata a ogni richiesta
 const scheduleCacheTick = async ($: EngineInterface) => {
   cacheTimer?.cancel()
   cacheTimer = null
@@ -376,38 +396,49 @@ const scheduleCacheTick = async ($: EngineInterface) => {
 }
 
 // Riempie gli atom della sessione: misura corrente, versione del mod ed email dell'account.
-// Serve all'avvio e dopo /clear, che apre una sessione con lo stato vuoto senza rifare session.start
+// Serve all'avvio e quando il disegno della barra vede una sessione nuova (/clear, /resume, fork), che parte con lo stato vuoto
+// senza rifare session.start. I tre passi sono indipendenti: un errore in uno non ferma gli altri
 const fill = async ($: EngineInterface) => {
-  const usage = await $.session.usage()
-  const measured = toSnapshot(usage.context, usage.rateLimits)
-  if (measured.fiveHour || measured.sevenDay) {
-    lastLimits = { fiveHour: measured.fiveHour, sevenDay: measured.sevenDay }
+  try {
+    const usage = await $.session.usage()
+    const measured = toSnapshot(usage.context, usage.rateLimits)
+    if (measured.fiveHour || measured.sevenDay) {
+      lastLimits = { fiveHour: measured.fiveHour, sevenDay: measured.sevenDay }
+    }
+    await update($, snapshot, () => ({
+      ...measured,
+      fiveHour: measured.fiveHour ?? lastLimits.fiveHour,
+      sevenDay: measured.sevenDay ?? lastLimits.sevenDay,
+    }))
+  } catch {
+    // misura non disponibile: la barra usa i ripieghi finché non arriva session.measure
   }
-  await update($, snapshot, () => ({
-    ...measured,
-    fiveHour: measured.fiveHour ?? lastLimits.fiveHour,
-    sevenDay: measured.sevenDay ?? lastLimits.sevenDay,
-  }))
 
   // Versione del mod, dal suo plugin.json (il file è del plugin, quindi leggibile)
-  const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
-  lastVersion = manifest.version ?? null
-  await update($, version, () => lastVersion)
+  try {
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+    lastVersion = manifest.version ?? null
+    await update($, version, () => lastVersion)
+  } catch {
+    // manifest non leggibile: la versione resta quella già vista nel processo, se c'è
+  }
 
-  // Email dell'account da `claude auth status`, senza bloccare; se il comando non c'è
-  // o fallisce resta il ripiego del hook prompt.context
+  // Email dell'account da `claude auth status`, senza bloccare; se il comando non c'è,
+  // fallisce o non la riporta vale quella del file di configurazione
   void (async () => {
+    let found: string | null = null
     try {
       const { stdout } = await $.process.run(['claude', 'auth', 'status'])
-      const found = JSON.parse(stdout).email
-      if (found) {
-        lastEmail = found
-        await update($, email, () => found)
-      }
+      found = JSON.parse(stdout).email || null
     } catch {
-      // nessun comando claude nel PATH o output non JSON: l'email resta non nota
+      // nessun comando claude nel PATH o output non JSON: si passa al file di configurazione
     }
-  })()
+    found ??= await readConfigEmail($)
+    if (found) {
+      lastEmail = found
+      await update($, email, () => found)
+    }
+  })().catch(() => undefined)
 }
 
 export const register: Register = on => {
@@ -421,17 +452,6 @@ export const register: Register = on => {
     await fill($)
     envCacheTtl = await readEnvCacheTtl($)
     await scheduleCacheTick($)
-
-    return result
-  })
-
-  // Dopo /clear, /resume o un fork lo stato della sessione riparte vuoto e session.start non scatta: lo riempie di nuovo
-  on('classic.SessionStart', async ($, e, next) => {
-    const result = await next(e)
-    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
-      // un errore qui non deve bloccare il cambio di sessione: al massimo la barra resta con n/d
-      await fill($).catch(() => undefined)
-    }
 
     return result
   })
@@ -522,44 +542,6 @@ export const register: Register = on => {
     return result
   })
 
-  // A fine turno l'evento classico Stop porta l'effort applicato (effort.level): seconda fonte,
-  // per quando turn.step non lo riporta; i turni dei subagenti (agent_id) non contano
-  on('classic.Stop', async ($, e, next) => {
-    if (e.agent_id === undefined && e.effort) {
-      await update($, effort, () => e.effort.level)
-    }
-
-    return next(e)
-  })
-
-  // I cambi di modello riportano la durata della cache del prompt usata dal motore: la ricorda per il countdown
-  on('classic.PreModelSwitch', async ($, e, next) => {
-    await update($, cacheTtl, () => e.cache_ttl)
-    await scheduleCacheTick($)
-
-    return next(e)
-  })
-  on('classic.PostModelSwitch', async ($, e, next) => {
-    await update($, cacheTtl, () => e.cache_ttl)
-    await scheduleCacheTick($)
-
-    return next(e)
-  })
-
-  // L'email dell'account viaggia nel blocco userEmail del contesto del primo messaggio: la legge senza modificarlo
-  on('prompt.context', async ($, e, next) => {
-    const result = await next(e)
-    const block = result.blocks.find(b => b.name === 'userEmail')
-    const found = block?.text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/)?.[0]
-
-    if (found) {
-      lastEmail = found
-      await update($, email, () => found)
-    }
-
-    return result
-  })
-
   // /usage-band: alterna barra visibile e nascosta
   on('command.run', { command: 'usage-band' }, async $ => {
     const hidden = !(await read($, isHidden))
@@ -578,14 +560,15 @@ export const register: Register = on => {
     // Una sola lettura dei dati del motore, per il costo della sessione e il ripiego del contesto; null se non risponde
     const usage = await $.session.usage().catch(() => null)
 
-    // Dopo /clear lo stato della sessione è vuoto: per 5h/7g, versione ed email valgono gli ultimi visti nel processo.
-    // Il contesto, se manca (ripresa con un altro plugin che scavalca SessionStart), è quello che il motore conosce già
+    // Dopo /clear, /resume o un fork lo stato della sessione è vuoto finché fill non lo riempie: il contesto e 5h/7g sono
+    // quelli che il motore conosce già, altrimenti 5h/7g, versione ed email sono gli ultimi visti nel processo
     const measured = await read($, snapshot)
+    const live = usage ? toSnapshot(usage.context, usage.rateLimits) : undefined
     const data: Snapshot = {
       ...measured,
       context: measured?.context ?? usage?.context.percent,
-      fiveHour: measured?.fiveHour ?? lastLimits.fiveHour,
-      sevenDay: measured?.sevenDay ?? lastLimits.sevenDay,
+      fiveHour: measured?.fiveHour ?? live?.fiveHour ?? lastLimits.fiveHour,
+      sevenDay: measured?.sevenDay ?? live?.sevenDay ?? lastLimits.sevenDay,
     }
     const folder = folderLabel(await $.session.cwd())
     // Durante un turno vale il modello della richiesta in corso (può cambiare durante il turno, ad esempio con opusplan), altrimenti quello della sessione
@@ -596,11 +579,17 @@ export const register: Register = on => {
     const account = (await read($, email)) ?? lastEmail
     const compact = (await read($, isCompact)) || lastCompact
     const cache = await cacheState($, false).catch(() => null)
-    // Prima volta che si disegna una sessione (anche ripresa con /resume, che non rifà session.start): avvia il countdown
+    // Prima volta che si disegna una sessione (anche ripresa con /resume, che non rifà session.start): avvia il countdown.
+    // Se prima se ne disegnava un'altra la sessione è cambiata (/clear, /resume, fork) e lo stato riparte vuoto: lo riempie
+    // di nuovo, come session.start all'avvio
     const sessionId = await $.session.id().catch(() => null)
     if (sessionId !== null && sessionId !== tickedSessionId) {
+      const isSessionChange = tickedSessionId !== null
       tickedSessionId = sessionId
       void scheduleCacheTick($)
+      if (isSessionChange) {
+        void fill($).catch(() => undefined)
+      }
     }
     const tokens = (await read($, operation)) ?? lastOperation
     const detailed = (await read($, isTokenDetailed)) || lastTokenDetailed

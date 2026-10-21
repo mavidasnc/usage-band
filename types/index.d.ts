@@ -28,7 +28,6 @@ declare module 'claude-code' {
       effort: string | number | null
       stepModel: string | null
       lastRequestAt: number | null
-      cacheTtl: '5m' | '1h' | null
       operation: Operation | null
       isTokenDetailed: boolean
     }

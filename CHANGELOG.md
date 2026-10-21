@@ -2,6 +2,20 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.14.2] - 2026-10-21
+
+### Corretto
+- Niente più avvisi `usage-band: its … hook was skipped` all'avvio e durante la sessione: il mod non ascolta più gli eventi classici (`SessionStart`, `Stop`, `PreModelSwitch`, `PostModelSwitch`) né `prompt.context`, che un plugin gestito come `cc-plugin-sec-default` può scavalcare.
+
+### Modificato
+- Dopo `/clear`, `/resume` o un fork la barra rilegge consumi, versione ed email al primo disegno della sessione nuova, invece che dall'evento classico `SessionStart`: funziona anche dove quell'evento viene scavalcato. Finché la lettura non arriva, 5h e 7g sono quelli che il motore conosce già.
+- Se `claude auth status` non risponde, l'email viene dal file di configurazione di Claude Code (`.claude.json`) invece che dal contesto del primo messaggio.
+- All'avvio un errore nella lettura dei consumi non impedisce più a versione ed email di comparire.
+- L'effort viene solo dalle richieste al modello (`turn.step`), che lo riportano già.
+
+### Rimosso
+- La durata della cache presa dal cambio di modello: viene da `FORCE_PROMPT_CACHING_5M` / `ENABLE_PROMPT_CACHING_1H`, altrimenti vale un'ora.
+
 ## [0.14.1] - 2026-10-21
 
 ### Modificato

@@ -179,57 +179,95 @@ test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => 
   expect(await (await mount()).find({ text: 'high' })).toBeDefined()
 })
 
-test("l'effort arriva anche dall'evento classico Stop, escluso quello dei subagenti", async ($, on) => {
+test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => {
+  // La sessione corrente e la lettura dei limiti del motore cambiano col /clear; auth status conta le chiamate
+  let sessionId = 's1'
+  let rateLimits: unknown[] = []
+  let authCalls = 0
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.id', () => ({ value: sessionId }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => {
+    authCalls++
+    return { value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }
+  })
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits } }) as never)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  const mount = () =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  await mount()
+  expect(authCalls).toBe(1)
+
+  // Il /clear: una sessione nuova, senza session.start né SessionStart (scavalcato da un plugin gestito), con limiti nuovi nel motore.
+  // Il primo disegno della sessione nuova la riempie di nuovo: misura, versione ed email (auth status richiamato)
+  sessionId = 's2'
+  rateLimits = [
+    { kind: 'five_hour', percentUsed: 12 },
+    { kind: 'seven_day', percentUsed: 40 },
+  ]
+  await mount()
+  expect(authCalls).toBe(2)
+  const ui = await mount()
+  expect(await ui.find({ text: /5h .* 12%/ })).toBeDefined()
+  expect(await ui.find({ text: /7g .* 40%/ })).toBeDefined()
+  expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
+  expect(await ui.find({ text: 'v9.9.9' })).toBeDefined()
+
+  // Un disegno successivo della stessa sessione non la riempie di nuovo
+  await mount()
+  expect(authCalls).toBe(2)
+
+  // Una misura senza limiti: la barra mostra quelli che il motore conosce ora, non gli ultimi visti nel processo
+  rateLimits = [
+    { kind: 'five_hour', percentUsed: 20 },
+    { kind: 'seven_day', percentUsed: 50 },
+  ]
+  await $.session.measure({ context: { window: 200000, percent: 10 }, rateLimits: [], changed: ['context'] } as never)
+  expect(await (await mount()).find({ text: /5h .* 20%/ })).toBeDefined()
+})
+
+test("senza claude auth status l'email viene dal file di configurazione", async ($, on) => {
+  mock.env(on, { CLAUDE_CONFIG_DIR: 'C:\\cfg' })
+  // Il percorso come lo raggiunge il motore, con i separatori di Windows
+  const config = 'C:\\cfg\\.claude.json'
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  // claude non è nel PATH
+  on('process.run', () => ({ deny: 'ENOENT' }) as never)
+  on('fs.stat', (_$, e) => (e.path === config ? { value: { kind: 'file', size: 1000, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }) as never)
+  on('fs.read', (_$, e) =>
+    ({
+      value: JSON.stringify(e.path === config ? { oauthAccount: { emailAddress: 'maurizio@mavida.com' } } : { name: 'usage-band', version: '9.9.9' }),
+    }) as never,
+  )
+
+  await $.session.start(START)
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
+})
+
+test("se la misura non risponde all'avvio, versione ed email compaiono lo stesso", async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ email: 'maurizio@mavida.com' }), stderr: '' } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
-  on('classic.Stop', () => ({}))
+  on('session.usage', () => ({ deny: 'non disponibile' }) as never)
 
   await $.session.start(START)
-
-  const mount = () =>
-    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
-
-  // Un Stop del thread principale con effort xhigh: compare
-  await $.classic.Stop({ stop_hook_active: false, effort: { level: 'xhigh' } } as never)
-  expect(await (await mount()).find({ text: 'xhigh' })).toBeDefined()
-
-  // Un Stop di un subagente non lo cambia
-  await $.classic.Stop({ stop_hook_active: false, agent_id: 'a1', effort: { level: 'low' } } as never)
-  expect(await (await mount()).find({ text: 'xhigh' })).toBeDefined()
-})
-
-test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => {
-  on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
-  on('session.model', () => ({ value: 'opus' }))
-  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
-  on('command.register', () => ({ value: { command: 'usage-band' } }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('classic.SessionStart', () => ({}))
-
-  await $.session.start(START)
-  await $.session.measure(MEASURE)
-
-  // Il /clear: la sessione nuova parte senza lettura dei limiti, il ripiego tiene gli ultimi visti
-  await $.classic.SessionStart({ source: 'clear' })
-  const ui = await $.ui.mount({
-    plugin: 'usage-band',
-    surface: 'terminal',
-    component: 'AbovePrompt',
-    props: PROPS,
-  })
-
-  expect(await ui.find({ text: /5h .* 75%/ })).toBeDefined()
-  expect(await ui.find({ text: /7g .* 31%/ })).toBeDefined()
-  expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   expect(await ui.find({ text: 'v9.9.9' })).toBeDefined()
+  expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeDefined()
 })
 
 test('il nome del modello è leggibile anche per ID datati, vecchio schema e contesto esteso', async ($, on) => {
@@ -266,11 +304,15 @@ test('il pulsante nasconde e rimostra cartella, modello, effort, email e version
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('classic.Stop', () => ({}))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never
+  })
 
   await $.session.start(START)
   await $.session.measure(MEASURE)
-  await $.classic.Stop({ stop_hook_active: false, effort: { level: 'medium' } } as never)
+  for await (const _chunk of $.turn.step({ turnId: 't1', index: 0, model: 'opus', effort: 'medium', messageCount: 1 } as never)) {
+    // nessun chunk atteso
+  }
 
   const mount = () =>
     $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
@@ -354,25 +396,33 @@ test('la cache mostra i minuti sopra i 10 minuti, poi minuti e secondi, poi scad
   expect(JSON.stringify(await ui.drawn())).toContain('"error"')
 })
 
-test('la durata della cache viene dalle variabili di ambiente e dal cambio di modello', async ($, on) => {
+test('la durata della cache viene dalle variabili di ambiente', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   mock.env(on, { ENABLE_PROMPT_CACHING_1H: '1', FORCE_PROMPT_CACHING_5M: '1' })
   stubEngine(on)
-  on('classic.PostModelSwitch', () => ({}))
   await $.session.start(START)
 
-  const mount = () =>
-    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   for await (const _chunk of $.turn.step({ turnId: 't', index: 0, model: 'opus', messageCount: 1 } as never)) {
     // nessun chunk atteso
   }
 
   // FORCE_PROMPT_CACHING_5M vince: cinque minuti, già sotto la soglia dei secondi
-  expect(await (await mount()).find({ text: /cache 5:00/ })).toBeDefined()
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ text: /cache 5:00/ })).toBeDefined()
+})
 
-  // Il motore riporta un'ora al cambio di modello: vale il suo dato
-  await $.classic.PostModelSwitch({ cache_ttl: '1h' } as never)
-  expect(await (await mount()).find({ text: /cache 60m/ })).toBeDefined()
+test("senza variabili di ambiente la cache dura un'ora", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  stubEngine(on)
+  await $.session.start(START)
+
+  for await (const _chunk of $.turn.step({ turnId: 't', index: 0, model: 'opus', messageCount: 1 } as never)) {
+    // nessun chunk atteso
+  }
+
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ text: /cache 60m/ })).toBeDefined()
 })
 
 test('con la cache disattivata la voce non compare', async ($, on) => {
