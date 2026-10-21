@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.14.1] - 2026-10-21
+
+### Modificato
+- `cache scaduta` è in rosso invece che attenuata, così la scadenza si nota a colpo d'occhio.
+
 ## [0.14.0] - 2026-10-21
 
 ### Aggiunto

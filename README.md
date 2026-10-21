@@ -13,7 +13,7 @@ L'immagine è un'illustrazione con valori di esempio.
   se il prompt contiene già del testo non lo tocca e mostra un avviso.
 - **cache**: tempo che resta prima che scada la cache del prompt, contato dall'ultima richiesta del thread principale:
   in minuti (`cache 42m`) sopra i 10 minuti, poi in minuti e secondi (`cache 9:58`), `cache scaduta` a zero.
-  Verde, giallo sotto il 25% della durata, rosso sotto il 10%. La durata (5 minuti o 1 ora) viene dal motore al cambio di modello,
+  Verde, giallo sotto il 25% della durata, rosso sotto il 10% e quando è scaduta. La durata (5 minuti o 1 ora) viene dal motore al cambio di modello,
   altrimenti da `FORCE_PROMPT_CACHING_5M` / `ENABLE_PROMPT_CACHING_1H`, altrimenti vale un'ora.
   Dopo `/resume` (o `claude --resume`) ctx e cache compaiono subito: la cache è contata dall'ultima risposta della conversazione ripresa,
   letta dal suo transcript.

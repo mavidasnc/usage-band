@@ -124,7 +124,7 @@ const cacheLabel = (remainingMs: number) => {
   return `${Math.floor(seconds / 60)}:${pad(seconds % 60)}`
 }
 
-// Colore della cache in base alla quota residua: verde, giallo sotto il 25%, rosso sotto il 10%
+// Colore della cache in base alla quota residua: verde, giallo sotto il 25%, rosso sotto il 10% e da scaduta
 const cacheColor = (remainingMs: number, ttlMs: number) =>
   remainingMs < ttlMs * 0.1 ? 'error' : remainingMs < ttlMs * 0.25 ? 'warning' : 'success'
 
@@ -623,10 +623,10 @@ export const register: Register = on => {
         </Text>
       )
 
-    // Tempo residuo della cache del prompt: n/d prima della prima richiesta, scaduta a zero; assente con la cache disattivata
+    // Tempo residuo della cache del prompt: n/d prima della prima richiesta, scaduta (in rosso) a zero; assente con la cache disattivata
     const cacheSegment =
-      cache === null ? null : cache.remainingMs === null || cache.remainingMs === 0 ? (
-        <Text dimColor>cache {cache.remainingMs === null ? 'n/d' : cacheLabel(0)}</Text>
+      cache === null ? null : cache.remainingMs === null ? (
+        <Text dimColor>cache n/d</Text>
       ) : (
         <Text>
           <Text dimColor>cache </Text>

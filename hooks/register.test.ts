@@ -351,6 +351,7 @@ test('la cache mostra i minuti sopra i 10 minuti, poi minuti e secondi, poi scad
   // Allo scadere
   await clock.advance(10 * 60_000)
   expect(await ui.find({ text: /cache scaduta/ })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).toContain('"error"')
 })
 
 test('la durata della cache viene dalle variabili di ambiente e dal cambio di modello', async ($, on) => {
