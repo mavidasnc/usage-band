@@ -385,6 +385,54 @@ test('con la cache disattivata la voce non compare', async ($, on) => {
   expect(await ui.find({ text: /cache/ })).toBeUndefined()
 })
 
+// Una riga del transcript: risposta del modello all'istante dato, del thread principale o di un subagente
+const responseRow = (at: number, isSidechain = false) =>
+  JSON.stringify({ type: 'assistant', isSidechain, timestamp: new Date(at).toISOString(), message: { model: 'claude-opus-5-5' } })
+
+test('dopo /resume la cache riparte dall\'ultima risposta del transcript', async ($, on) => {
+  const NOW = Date.parse('2026-10-21T10:00:00Z')
+  mock.clock(on, { now: NOW })
+  mock.env(on, { CLAUDE_CONFIG_DIR: 'C:\\cfg' })
+  // Il transcript come lo raggiunge il motore, con i separatori di Windows
+  const transcript = 'C:\\cfg\\projects\\C--Users-maurizio-Claude-mio-progetto\\s1.jsonl'
+  const rows = [
+    // l'ultima risposta del thread principale, 10 minuti fa
+    responseRow(NOW - 10 * 60_000),
+    // dopo: un subagente, una risposta sintetica e una riga di sistema, che non contano
+    responseRow(NOW - 60_000, true),
+    JSON.stringify({ type: 'assistant', timestamp: new Date(NOW - 30_000).toISOString(), message: { model: '<synthetic>' } }),
+    JSON.stringify({ type: 'system', timestamp: new Date(NOW).toISOString() }),
+  ]
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.root', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('session.id', () => ({ value: 's1' }))
+  on('fs.stat', (_$, e) => (e.path === transcript ? { value: { kind: 'file', size: 1000, mtimeMs: NOW, isLink: false } } : { deny: 'ENOENT' }) as never)
+  on('fs.read', (_$, e) =>
+    ({ value: e.path === transcript ? rows.join('\n') + '\n' : JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }) as never,
+  )
+  await $.session.start(START)
+
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ text: /cache 50m/ })).toBeDefined()
+})
+
+test('senza SessionStart il contesto viene comunque dal motore', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  // Il motore conosce già il contesto, ma lo stato del mod è vuoto: nessuna misura né SessionStart lo ha raggiunto
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 42 }, rateLimits: [] } }))
+
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ text: /ctx .* 42%/ })).toBeDefined()
+})
+
 // Un prompt scritto dalla persona: prompt.submit dal terminale, poi il turno che lo esegue
 const prompt = async ($: Parameters<Parameters<typeof test>[1]>[0], text: string, turnId: string) => {
   await $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false } as never)

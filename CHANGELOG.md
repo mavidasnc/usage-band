@@ -2,6 +2,15 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.13.0] - 2026-10-21
+
+### Aggiunto
+- Dopo `/resume` (o `claude --resume`, o un fork) la barra mostra subito il tempo che resta alla cache del prompt, contato dall'ultima risposta del thread principale letta dal transcript della conversazione ripresa, invece di restare `n/d` fino al prompt successivo. Funziona anche con le chat già fatte e non dipende dagli eventi classici, che un plugin gestito può scavalcare. Un transcript oltre i 4 MiB si legge solo nelle ultime righe.
+- Se lo stato del mod è vuoto (ad esempio dopo `/resume`, o perché un altro plugin scavalca l'evento di avvio), la percentuale di contesto viene letta direttamente dal motore.
+
+### Modificato
+- Dopo `/resume` o un fork la barra riprende anche 5h, 7g, versione ed email, come dopo `/clear`, quando l'evento di avvio arriva al mod.
+
 ## [0.12.0] - 2026-10-17
 
 ### Aggiunto

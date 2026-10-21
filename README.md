@@ -13,6 +13,8 @@ L'immagine è un'illustrazione con valori di esempio.
   in minuti (`cache 42m`) sopra i 10 minuti, poi in minuti e secondi (`cache 9:58`), `cache scaduta` a zero.
   Verde, giallo sotto il 25% della durata, rosso sotto il 10%. La durata (5 minuti o 1 ora) viene dal motore al cambio di modello,
   altrimenti da `FORCE_PROMPT_CACHING_5M` / `ENABLE_PROMPT_CACHING_1H`, altrimenti vale un'ora.
+  Dopo `/resume` (o `claude --resume`) ctx e cache compaiono subito: la cache è contata dall'ultima risposta della conversazione ripresa,
+  letta dal suo transcript.
 - **tkn**: consumo dell'ultimo prompt, con tutte le richieste in cui si spezza e i subagenti che lancia.
   Compatto: token nuovi (ingresso e uscita) e costo (`tkn 28.7k · $0.54`). Un clic sulla voce passa al dettaglio
   (`tkn ↑27.8k ↓875 ♺ 939.6k 97% (∴37.6k) · $0.54`): ingresso, uscita, letti dalla cache con la quota di riuso,

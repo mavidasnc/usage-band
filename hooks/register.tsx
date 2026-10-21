@@ -231,14 +231,96 @@ const addUsage = async ($: EngineInterface, agentId: string | undefined, usage: 
   })
 }
 
-// Stato corrente della cache: durata in uso e millisecondi residui (null prima della prima richiesta), oppure null se disattivata
-const cacheState = async ($: EngineInterface) => {
+// Righe finali lette da un transcript troppo grande per $.fs.read (4 MiB): bastano a trovare l'ultima risposta
+const TRANSCRIPT_TAIL_LINES = 100
+
+// Dimensione oltre la quale $.fs.read rifiuta un file
+const FS_READ_LIMIT = 4 * 1024 * 1024
+
+// Sessione per cui il disegno della barra ha già avviato il countdown: dopo /resume nessun altro evento lo avvia
+let tickedSessionId: string | null = null
+
+// Lettura del transcript della sessione: istante dell'ultima risposta del thread principale, una volta per sessione
+let transcriptLoad: { sessionId: string; promise: Promise<number | null>; at?: number | null } | null = null
+
+// Testo del transcript di una sessione, o solo le sue ultime righe se è troppo grande; null se non si trova.
+// Il file è <cartella di configurazione>/projects/<cartella del progetto con ogni carattere non alfanumerico come '-'>/<id>.jsonl
+const readTranscript = async ($: EngineInterface, sessionId: string) => {
+  const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'))
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || (home ? `${home}/.claude` : null)
+  if (!configDir) {
+    return null
+  }
+  // La cartella del progetto è quella di partenza: la radice della sessione, o la cartella di lavoro
+  const folders = [...new Set([await $.session.root(), await $.session.cwd()])]
+  for (const folder of folders) {
+    const path = `${configDir}/projects/${folder.replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}.jsonl`
+    const stat = await $.fs.stat(path).catch(() => null)
+    if (stat?.kind !== 'file') {
+      continue
+    }
+    if (stat.size < FS_READ_LIMIT) {
+      return $.fs.read(path)
+    }
+    // Troppo grande per una lettura intera: le ultime righe con il comando del sistema
+    const isWindows = /^[a-zA-Z]:[\\/]/.test(path)
+    const argv = isWindows
+      ? ['powershell', '-NoProfile', '-Command', `Get-Content -LiteralPath '${path.replace(/'/g, "''")}' -Tail ${TRANSCRIPT_TAIL_LINES} -Encoding UTF8`]
+      : ['tail', '-n', String(TRANSCRIPT_TAIL_LINES), path]
+    return (await $.process.run(argv)).stdout
+  }
+  return null
+}
+
+// Istante, in millisecondi, dell'ultima risposta del thread principale nel transcript: le righe dei subagenti
+// (isSidechain) e le risposte sintetiche del motore non contano; null se non c'è o il transcript non si legge
+const readLastResponseAt = async ($: EngineInterface, sessionId: string) => {
+  try {
+    const text = await readTranscript($, sessionId)
+    const lines = text?.split('\n') ?? []
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"type":"assistant"')) {
+        continue
+      }
+      try {
+        const row = JSON.parse(lines[i])
+        const at = Date.parse(row.timestamp)
+        if (row.type === 'assistant' && !row.isSidechain && row.message?.model !== '<synthetic>' && !Number.isNaN(at)) {
+          return at
+        }
+      } catch {
+        // riga tagliata in testa alle ultime righe: si passa alla precedente
+      }
+    }
+  } catch {
+    // transcript non leggibile: la cache resta n/d fino alla prossima richiesta
+  }
+  return null
+}
+
+// Ultima risposta della sessione corrente letta dal transcript (conversazione ripresa). La prima chiamata per sessione
+// avvia la lettura; con wait false (durante il disegno) non la attende e finché non finisce vale null
+const transcriptResponseAt = async ($: EngineInterface, wait: boolean) => {
+  const sessionId = await $.session.id()
+  if (transcriptLoad?.sessionId !== sessionId) {
+    const load: NonNullable<typeof transcriptLoad> = { sessionId, promise: readLastResponseAt($, sessionId) }
+    void load.promise.then(at => {
+      load.at = at
+    })
+    transcriptLoad = load
+  }
+  return wait ? transcriptLoad.promise : (transcriptLoad.at ?? null)
+}
+
+// Stato corrente della cache: durata in uso e millisecondi residui (null prima della prima richiesta), oppure null se disattivata.
+// Senza una richiesta in questa sessione vale l'ultima risposta del transcript (conversazione ripresa); wait come per transcriptResponseAt
+const cacheState = async ($: EngineInterface, wait = true) => {
   const ttl = (await read($, cacheTtl)) ?? envCacheTtl ?? '1h'
   if (ttl === 'off') {
     return null
   }
   const ttlMs = CACHE_TTL_MS[ttl]
-  const lastAt = await read($, lastRequestAt)
+  const lastAt = (await read($, lastRequestAt)) ?? (await transcriptResponseAt($, wait).catch(() => null))
   const remainingMs = lastAt === null ? null : Math.max(lastAt + ttlMs - (await $.clock.now()), 0)
 
   return { ttlMs, remainingMs }
@@ -337,11 +419,11 @@ export const register: Register = on => {
     return result
   })
 
-  // Dopo /clear lo stato della sessione riparte vuoto e session.start non scatta: lo riempie di nuovo
+  // Dopo /clear, /resume o un fork lo stato della sessione riparte vuoto e session.start non scatta: lo riempie di nuovo
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
-    if (e.source === 'clear') {
-      // un errore qui non deve bloccare il /clear: al massimo la barra resta con n/d
+    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
+      // un errore qui non deve bloccare il cambio di sessione: al massimo la barra resta con n/d
       await fill($).catch(() => undefined)
     }
 
@@ -487,10 +569,15 @@ export const register: Register = on => {
       return next(e)
     }
 
-    // Dopo /clear lo stato della sessione è vuoto: per 5h/7g, versione ed email valgono gli ultimi visti nel processo
+    // Una sola lettura dei dati del motore, per il costo della sessione e il ripiego del contesto; null se non risponde
+    const usage = await $.session.usage().catch(() => null)
+
+    // Dopo /clear lo stato della sessione è vuoto: per 5h/7g, versione ed email valgono gli ultimi visti nel processo.
+    // Il contesto, se manca (ripresa con un altro plugin che scavalca SessionStart), è quello che il motore conosce già
     const measured = await read($, snapshot)
     const data: Snapshot = {
       ...measured,
+      context: measured?.context ?? usage?.context.percent,
       fiveHour: measured?.fiveHour ?? lastLimits.fiveHour,
       sevenDay: measured?.sevenDay ?? lastLimits.sevenDay,
     }
@@ -502,11 +589,17 @@ export const register: Register = on => {
     const level = await read($, effort)
     const account = (await read($, email)) ?? lastEmail
     const compact = (await read($, isCompact)) || lastCompact
-    const cache = await cacheState($).catch(() => null)
+    const cache = await cacheState($, false).catch(() => null)
+    // Prima volta che si disegna una sessione (anche ripresa con /resume, che non rifà session.start): avvia il countdown
+    const sessionId = await $.session.id().catch(() => null)
+    if (sessionId !== null && sessionId !== tickedSessionId) {
+      tickedSessionId = sessionId
+      void scheduleCacheTick($)
+    }
     const tokens = (await read($, operation)) ?? lastOperation
     const detailed = (await read($, isTokenDetailed)) || lastTokenDetailed
     // Costo dell'intera sessione: nullo dove il motore non lo conta, assente finché non c'è una richiesta pagata
-    const sessionUsd = await sessionCost($)
+    const sessionUsd = usage?.cost?.usd ?? null
     const sessionText = sessionUsd !== null && sessionUsd > 0 ? costLabel(sessionUsd) : null
     const { Box, Button, Text } = $.ui.resolve(e)
 
