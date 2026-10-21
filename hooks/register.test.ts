@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 // Proprietà della band come le passa il motore
 const PROPS = { hasSurvey: false, isWorking: false, maxRows: 10 } as never
@@ -16,13 +16,18 @@ const MEASURE = {
   changed: ['context', 'rateLimits'],
 } as never
 
+// Risultato di process.run come lo dà il motore: uscita, testo e nessun taglio
+const ran = (stdout: string, exitCode = 0) => ({
+  value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+})
+
 test('la barra mostra le tre percentuali con i colori per soglia', async ($, on) => {
   // Il motore sotto i plugin: nessun dato all'avvio, la misura viene dal test
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
@@ -67,7 +72,7 @@ test('senza alcun dato la barra resta visibile con n/d', async ($, on) => {
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   await $.session.start(START)
@@ -88,7 +93,7 @@ test('/usage-band nasconde e rimostra la barra', async ($, on) => {
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
@@ -117,7 +122,7 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
 
@@ -148,7 +153,7 @@ test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => 
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('process.run', () => ran(JSON.stringify({ email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   // Il motore sotto turn.step: nessun chunk, risposta con turno e indice della richiesta
@@ -191,7 +196,7 @@ test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => 
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => {
     authCalls++
-    return { value: { exitCode: 0, stdout: JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }), stderr: '' } }
+    return ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }))
   })
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits } }) as never)
@@ -260,7 +265,7 @@ test("se la misura non risponde all'avvio, versione ed email compaiono lo stesso
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('process.run', () => ran(JSON.stringify({ email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ deny: 'non disponibile' }) as never)
 
@@ -276,7 +281,7 @@ test('il nome del modello è leggibile anche per ID datati, vecchio schema e con
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: model }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('process.run', () => ran('', 1))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   await $.session.start(START)
@@ -300,7 +305,7 @@ test('il pulsante nasconde e rimostra cartella, modello, effort, email e version
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify({ email: 'maurizio@mavida.com' }), stderr: '' } }))
+  on('process.run', () => ran(JSON.stringify({ email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
@@ -337,7 +342,7 @@ test('il pulsante nasconde e rimostra cartella, modello, effort, email e version
 // Il motore sotto la band per i test della cache e dei token: dati minimi e turn.step che risponde senza chunk,
 // con i token che `usages` assegna alla richiesta (turno/indice), se ci sono, e il costo della sessione in `cost.usd`, se c'è
 const stubEngine = (
-  on: Parameters<Parameters<typeof test>[1]>[1],
+  on: Parameters<TestBody>[1],
   usages: Record<string, unknown> = {},
   cost: { usd?: number } = {},
 ) => {
@@ -345,7 +350,7 @@ const stubEngine = (
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('process.run', () => ran('', 1))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({
     value: { startedAt: 0, context: { window: 200000 }, rateLimits: [], ...(cost.usd === undefined ? {} : { cost: { usd: cost.usd } }) },
@@ -460,7 +465,7 @@ test('dopo /resume la cache riparte dall\'ultima risposta del transcript', async
   on('session.model', () => ({ value: 'opus' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
-  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('process.run', () => ran('', 1))
   on('session.id', () => ({ value: 's1' }))
   on('fs.stat', (_$, e) => (e.path === transcript ? { value: { kind: 'file', size: 1000, mtimeMs: NOW, isLink: false } } : { deny: 'ENOENT' }) as never)
   on('fs.read', (_$, e) =>
@@ -485,7 +490,7 @@ test('senza SessionStart il contesto viene comunque dal motore', async ($, on) =
 })
 
 // Un prompt scritto dalla persona: prompt.submit dal terminale, poi il turno che lo esegue
-const prompt = async ($: Parameters<Parameters<typeof test>[1]>[0], text: string, turnId: string) => {
+const prompt = async ($: Parameters<TestBody>[0], text: string, turnId: string) => {
   await $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false } as never)
   await $.turn.start({ text, turnId } as never)
 }
@@ -644,7 +649,7 @@ test('il clic sul contesto scrive nel prompt vuoto la richiesta di valutare /com
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }))
+  on('process.run', () => ran('', 1))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))

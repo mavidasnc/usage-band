@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.14.3] - 2026-10-21
+
+### Corretto
+- Il mod e i suoi test passano il controllo dei tipi di TypeScript (`tsc`) senza errori; nessun cambiamento nel funzionamento.
+
 ## [0.14.2] - 2026-10-21
 
 ### Corretto

@@ -93,12 +93,12 @@ const modelLabel = (id: string) => {
 
   // Schema attuale: famiglia, poi versione (opus-5-5, haiku-4)
   const current = name.match(/^([a-z]+)-(\d+(?:-\d+)?)$/)
-  if (current) {
+  if (current?.[1] && current[2]) {
     return `${capitalize(current[1])} ${current[2].replace('-', '.')}${suffix}`
   }
   // Schema precedente: versione, poi famiglia (3-5-sonnet)
   const legacy = name.match(/^(\d+(?:-\d+)?)-([a-z]+)$/)
-  if (legacy) {
+  if (legacy?.[1] && legacy[2]) {
     return `${capitalize(legacy[2])} ${legacy[1].replace('-', '.')}${suffix}`
   }
   // Alias senza versione (opus, sonnet)
@@ -305,11 +305,12 @@ const readLastResponseAt = async ($: EngineInterface, sessionId: string) => {
     const text = await readTranscript($, sessionId)
     const lines = text?.split('\n') ?? []
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (!lines[i].includes('"type":"assistant"')) {
+      const line = lines[i]
+      if (!line?.includes('"type":"assistant"')) {
         continue
       }
       try {
-        const row = JSON.parse(lines[i])
+        const row = JSON.parse(line)
         const at = Date.parse(row.timestamp)
         if (row.type === 'assistant' && !row.isSidechain && row.message?.model !== '<synthetic>' && !Number.isNaN(at)) {
           return at
@@ -517,7 +518,7 @@ export const register: Register = on => {
   // Anche il riassunto della compattazione consuma token: si sommano all'operazione in cui avviene
   on('session.compact', async ($, e, next) => {
     const result = await next(e)
-    await addUsage($, e.agentId, result.usage)
+    await addUsage($, e.agentId, 'skip' in result ? undefined : result.usage)
 
     return result
   })
