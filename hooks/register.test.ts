@@ -189,6 +189,7 @@ test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => 
   let sessionId = 's1'
   let rateLimits: unknown[] = []
   let authCalls = 0
+  const clock = mock.clock(on)
   on('session.start', () => ({ cwd: '' }))
   on('session.id', () => ({ value: sessionId }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
@@ -210,13 +211,14 @@ test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => 
   expect(authCalls).toBe(1)
 
   // Il /clear: una sessione nuova, senza session.start né SessionStart (scavalcato da un plugin gestito), con limiti nuovi nel motore.
-  // Il primo disegno della sessione nuova la riempie di nuovo: misura, versione ed email (auth status richiamato)
+  // Il primo disegno della sessione nuova la riempie di nuovo, a disegno finito: misura, versione ed email (auth status richiamato)
   sessionId = 's2'
   rateLimits = [
     { kind: 'five_hour', percentUsed: 12 },
     { kind: 'seven_day', percentUsed: 40 },
   ]
   await mount()
+  await clock.settle()
   expect(authCalls).toBe(2)
   const ui = await mount()
   expect(await ui.find({ text: /5h .* 12%/ })).toBeDefined()
@@ -698,27 +700,63 @@ test('il clic sul contesto scrive nel prompt vuoto la richiesta di valutare /com
   expect(submitted).toBe(false)
 })
 
-test("il clic sul modello esegue /model e quello sull'effort esegue /effort", async ($, on) => {
+test("il clic su modello ed effort apre il pannello che li cambia", async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  // Le impostazioni dell'utente, dove /effort salva il livello del modello in uso (il percorso con i separatori di Windows)
+  mock.env(on, { CLAUDE_CONFIG_DIR: 'C:\\cfg' })
+  const settingsPath = 'C:\\cfg\\settings.json'
+  const settings = { effortLevel: 'medium', modelSettings: { 'claude-opus-5-5': { effortLevel: 'high' } } }
+  on('fs.stat', (_$, e) => (e.path === settingsPath ? { value: { kind: 'file', size: 1000, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }) as never)
+  on('fs.read', (_$, e) =>
+    ({ value: JSON.stringify(e.path === settingsPath ? settings : { name: 'usage-band', version: '9.9.9' }) }) as never,
+  )
   on('process.run', () => ran('', 1))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('turn.step', async function* (_$, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never
   })
-  // Il motore sotto command.run: registra i comandi eseguiti, o li rifiuta; gli avvisi mostrati
+  // Il motore sotto i pannelli, /config e command.run: registra ciò che il mod apre, chiude, cambia ed esegue, o lo rifiuta
+  const opened: { id: string; focus?: true; closeOnEscape?: true }[] = []
+  const closed: string[] = []
+  const configs: { key: string; value: unknown }[] = []
   const commands: string[] = []
-  let isRefused = false
   const toasts: string[] = []
+  let isRefused = false
+  const clock = mock.clock(on)
+  on('ui.open', (_$, e) => {
+    opened.push({ id: e.id, focus: e.focus, closeOnEscape: e.closeOnEscape })
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', (_$, e) => {
+    closed.push(e.id)
+    return { value: undefined }
+  })
+  on('config.list', () => ({
+    value: [
+      { key: 'theme', label: 'Theme', kind: 'choice', value: 'dark', options: ['dark', 'light'], provider: {}, isLocked: false },
+      { key: 'model', label: 'Model', kind: 'choice', value: 'opus', options: ['default', 'sonnet', 'opus'], provider: {}, isLocked: false },
+    ],
+  }) as never)
+  on('config.set', (_$, e) => {
+    if (isRefused) {
+      return { deny: 'bloccato' }
+    }
+    configs.push({ key: e.key, value: e.value })
+    return { value: e.value }
+  })
   on('command.run', (_$, e) => {
     if (isRefused) {
       throw new Error('rifiutato')
     }
-    commands.push(e.command)
-    return { text: '' }
+    commands.push(`${e.command} ${e.args}`)
+    // Come /effort: max vale solo per la sessione e non si salva, gli altri livelli si salvano per il modello; ai plugin non arriva testo
+    if (e.args !== 'max') {
+      settings.modelSettings['claude-opus-5-5'].effortLevel = e.args
+    }
+    return {}
   })
   on('ui.toast', (_$, e) => {
     toasts.push(e.text)
@@ -734,15 +772,60 @@ test("il clic sul modello esegue /model e quello sull'effort esegue /effort", as
   expect(await ui.find({ text: /Opus 5\.5/ })).toBeDefined()
   expect(await ui.find({ text: 'high' })).toBeDefined()
 
+  // I clic aprono i pannelli con la tastiera sulla lista, chiudibili con Esc; nessun comando eseguito
   await ui.press({ key: 'model' })
-  expect(commands).toEqual(['model'])
   await ui.press({ key: 'effort' })
-  expect(commands).toEqual(['model', 'effort'])
+  expect(opened).toEqual([
+    { id: 'usage-band-model', focus: true, closeOnEscape: true },
+    { id: 'usage-band-effort', focus: true, closeOnEscape: true },
+  ])
+  expect(commands).toEqual([])
+
+  // Pannello del modello: le scelte della riga Model di /config, la scelta la cambia lì e chiude il pannello
+  const pane = (requestId: string) =>
+    $.ui.mount({
+      plugin: 'usage-band',
+      surface: 'terminal',
+      component: 'Pane',
+      requestId,
+      props: { title: '', isFocused: true, bodyColumns: 60, placement: 'inline', scroll: { offset: 0, bodyRows: 12 }, view: {} },
+    })
+  // Una riga per scelta, col suo tasto numerico; quella attuale segnata e con il cursore
+  const modelPane = await pane('usage-band-model')
+  const modelButtons = await modelPane.findAll({ type: 'Button' })
+  expect(modelButtons.map(b => [b.props.label, b.props.hotkey])).toEqual([
+    ['default', '1'],
+    ['sonnet', '2'],
+    ['opus ✓', '3'],
+  ])
+  expect(modelButtons.map(b => b.props.autoFocus ?? false)).toEqual([false, false, true])
+  await modelPane.press({ key: 'model:sonnet' })
+  expect(configs).toEqual([{ key: 'model', value: 'sonnet' }])
+  expect(commands).toEqual([])
+  expect(closed).toEqual(['usage-band-model'])
+
+  // Pannello dell'effort: la scelta esegue /effort con il livello e la barra mostra subito quello che il comando conferma
+  const effortPane = await pane('usage-band-effort')
+  const effortButtons = await effortPane.findAll({ type: 'Button' })
+  expect(effortButtons.map(b => b.props.label)).toEqual(['low', 'medium', 'high ✓', 'xhigh', 'max'])
+  const band = async () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  await effortPane.press({ key: 'effort:max' })
+  await clock.settle()
+  expect(commands).toEqual(['effort max'])
+  expect(closed).toEqual(['usage-band-model', 'usage-band-effort'])
+  expect(await (await band()).find({ text: 'max' })).toBeDefined()
+  await effortPane.press({ key: 'effort:medium' })
+  await clock.settle()
+  expect(commands).toEqual(['effort max', 'effort medium'])
+  expect(await (await band()).find({ text: 'medium' })).toBeDefined()
   expect(toasts).toEqual([])
 
-  // Se il motore rifiuta il comando, un avviso
+  // Se il motore rifiuta il cambio, un avviso e il pannello si chiude lo stesso
   isRefused = true
-  await ui.press({ key: 'effort' })
-  expect(commands).toEqual(['model', 'effort'])
-  expect(toasts).toEqual(['Impossibile eseguire /effort'])
+  await modelPane.press({ key: 'model:default' })
+  await effortPane.press({ key: 'effort:low' })
+  await clock.settle()
+  expect(configs).toEqual([{ key: 'model', value: 'sonnet' }])
+  expect(commands).toEqual(['effort max', 'effort medium'])
+  expect(toasts).toEqual(['Modello non cambiato: bloccato', 'Impossibile eseguire /effort low'])
 })

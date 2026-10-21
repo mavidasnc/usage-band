@@ -2,6 +2,15 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.16.0] - 2026-10-21
+
+### Modificato
+- Un clic sul modello o sull'effort apre un pannello con la lista delle scelte, una per riga, invece di eseguire `/model` o `/effort`. Si sceglie con il tasto numerico della riga, con un clic o con Tab e Invio; la scelta attuale è segnata con ✓; Esc chiude. Il pannello compare sopra il prompt, oppure a lato della conversazione a schermo intero.
+- Il modello si cambia come dalla riga Model di `/config`, senza comandi nella conversazione. L'effort, che non ha una riga in `/config`, si cambia con `/effort <livello>`, che lascia una riga nella conversazione; finito il comando, la barra mostra subito il livello in vigore, letto dalle impostazioni dove `/effort` lo salva (un livello che il modello non ha lascia quello di prima); `max`, che `/effort` applica solo alla sessione senza salvarlo, compare così com'è. Vale anche per un `/effort <livello>` scritto a mano.
+
+### Corretto
+- Dopo `/clear`, `/resume` o un fork la rilettura di consumi, versione ed email parte a disegno finito: il motore rifiuta le scritture di stato fatte durante il disegno della barra, e i valori nuovi potevano non arrivare.
+
 ## [0.15.0] - 2026-10-21
 
 ### Aggiunto
