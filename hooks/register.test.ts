@@ -697,3 +697,52 @@ test('il clic sul contesto scrive nel prompt vuoto la richiesta di valutare /com
   ])
   expect(submitted).toBe(false)
 })
+
+test("il clic sul modello esegue /model e quello sull'effort esegue /effort", async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ran('', 1))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never
+  })
+  // Il motore sotto command.run: registra i comandi eseguiti, o li rifiuta; gli avvisi mostrati
+  const commands: string[] = []
+  let isRefused = false
+  const toasts: string[] = []
+  on('command.run', (_$, e) => {
+    if (isRefused) {
+      throw new Error('rifiutato')
+    }
+    commands.push(e.command)
+    return { text: '' }
+  })
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+
+  await $.session.start(START)
+  for await (const _chunk of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 1 } as never)) {
+    // nessun chunk atteso
+  }
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  // Le voci restano uguali a prima: nome del modello ed effort
+  expect(await ui.find({ text: /Opus 5\.5/ })).toBeDefined()
+  expect(await ui.find({ text: 'high' })).toBeDefined()
+
+  await ui.press({ key: 'model' })
+  expect(commands).toEqual(['model'])
+  await ui.press({ key: 'effort' })
+  expect(commands).toEqual(['model', 'effort'])
+  expect(toasts).toEqual([])
+
+  // Se il motore rifiuta il comando, un avviso
+  isRefused = true
+  await ui.press({ key: 'effort' })
+  expect(commands).toEqual(['model', 'effort'])
+  expect(toasts).toEqual(['Impossibile eseguire /effort'])
+})

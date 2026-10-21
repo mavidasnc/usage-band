@@ -685,8 +685,18 @@ export const register: Register = on => {
     // Costo della sessione, subito dopo i token: solo il valore, non cliccabile, in rosa (bashBorder) per distinguerlo dalle altre voci
     const sessionItem = sessionText ? <Text color="bashBorder">{sessionText}</Text> : null
 
+    // Esegue un comando slash come se la persona lo avesse digitato, senza toccare la bozza nel prompt; se il motore lo rifiuta, un avviso
+    const runCommand = async (command: string) => {
+      try {
+        await $.command.run({ command })
+      } catch {
+        $.ui.toast(`Impossibile eseguire /${command}`)
+      }
+    }
+
     // Riga dell'ambiente: token, costo della sessione, cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione
-    // del mod (verde acqua); token, costo, effort, email e versione compaiono quando sono noti
+    // del mod (verde acqua); token, costo, effort, email e versione compaiono quando sono noti. Modello ed effort sono pulsanti che
+    // eseguono /model e /effort, quindi stanno fuori dai Text
     const envRow = (
       <Box>
         {tokenItem}
@@ -696,9 +706,17 @@ export const register: Register = on => {
           {sessionItem ? <Text dimColor> │ </Text> : null}
           <Text color="warning">{folder}</Text>
           <Text dimColor> │ </Text>
+        </Text>
+        <Button key="model" label={model} plain onPress={() => runCommand('model')}>
           <Text color="claude">{model}</Text>
-          {level !== null ? <Text dimColor> │ </Text> : null}
-          {level !== null ? <Text color="autoAccept">{level}</Text> : null}
+        </Button>
+        {level !== null ? <Text dimColor> │ </Text> : null}
+        {level !== null ? (
+          <Button key="effort" label={String(level)} plain onPress={() => runCommand('effort')}>
+            <Text color="autoAccept">{level}</Text>
+          </Button>
+        ) : null}
+        <Text>
           {account ? <Text dimColor> │ </Text> : null}
           {account ? <Text color="suggestion">{account}</Text> : null}
           {modVersion ? <Text dimColor> │ </Text> : null}

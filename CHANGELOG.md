@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.15.0] - 2026-10-21
+
+### Aggiunto
+- Un clic sul nome del modello esegue `/model`, un clic sull'effort esegue `/effort`, come se fossero stati digitati; la bozza nel prompt resta intatta. Se il comando non può partire compare un avviso.
+
 ## [0.14.3] - 2026-10-21
 
 ### Corretto
