@@ -829,3 +829,35 @@ test("il clic su modello ed effort apre il pannello che li cambia", async ($, on
   expect(commands).toEqual(['effort max', 'effort medium'])
   expect(toasts).toEqual(['Modello non cambiato: bloccato', 'Impossibile eseguire /effort low'])
 })
+
+test("in una sessione nuova o ripresa l'effort viene dalle impostazioni prima del primo prompt", async ($, on) => {
+  const clock = mock.clock(on)
+  let sessionId = 's1'
+  on('session.start', () => ({ cwd: '' }))
+  on('session.id', () => ({ value: sessionId }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  // Le impostazioni dell'utente: effort generale e quello salvato per il modello in uso
+  mock.env(on, { CLAUDE_CONFIG_DIR: 'C:\\cfg' })
+  const settingsPath = 'C:\\cfg\\settings.json'
+  const settings = { effortLevel: 'medium', modelSettings: { 'claude-opus-5-5': { effortLevel: 'xhigh' } } }
+  on('fs.stat', (_$, e) => (e.path === settingsPath ? { value: { kind: 'file', size: 1000, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }) as never)
+  on('fs.read', (_$, e) =>
+    ({ value: JSON.stringify(e.path === settingsPath ? settings : { name: 'usage-band', version: '9.9.9' }) }) as never,
+  )
+  on('process.run', () => ran('', 1))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  // All'avvio, senza alcuna richiesta al modello: l'effort salvato per il modello
+  await $.session.start(START)
+  expect(await (await mount()).find({ text: 'xhigh' })).toBeDefined()
+
+  // Dopo /clear o /resume (sessione nuova) torna dalle impostazioni, ora cambiate
+  settings.modelSettings['claude-opus-5-5'].effortLevel = 'low'
+  sessionId = 's2'
+  await mount()
+  await clock.settle()
+  expect(await (await mount()).find({ text: 'low' })).toBeDefined()
+})

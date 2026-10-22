@@ -442,7 +442,7 @@ const refreshEffort = async ($: EngineInterface, requested: string) => {
   }
 }
 
-// Riempie gli atom della sessione: misura corrente, versione del mod ed email dell'account.
+// Riempie gli atom della sessione: misura corrente, versione del mod, effort ed email dell'account.
 // Serve all'avvio e quando il disegno della barra vede una sessione nuova (/clear, /resume, fork), che parte con lo stato vuoto
 // senza rifare session.start. I tre passi sono indipendenti: un errore in uno non ferma gli altri
 const fill = async ($: EngineInterface) => {
@@ -468,6 +468,17 @@ const fill = async ($: EngineInterface) => {
     await update($, version, () => lastVersion)
   } catch {
     // manifest non leggibile: la versione resta quella già vista nel processo, se c'è
+  }
+
+  // Effort in vigore prima della prima richiesta al modello: una sessione nuova o ripresa parte da quello salvato nelle impostazioni
+  // per il modello in uso (un max di sola sessione non c'è più); la prossima richiesta lo conferma o lo corregge
+  try {
+    const level = await readSettingsEffort($, await $.session.model())
+    if (level) {
+      await update($, effort, () => level)
+    }
+  } catch {
+    // modello o impostazioni non disponibili: l'effort arriva con la prima richiesta
   }
 
   // Email dell'account da `claude auth status`, senza bloccare; se il comando non c'è,

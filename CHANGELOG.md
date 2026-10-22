@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.16.1] - 2026-10-21
+
+### Corretto
+- L'effort compare subito in una sessione nuova, dopo `/clear` e dopo `/resume`, senza attendere il primo prompt: viene dalle impostazioni salvate da `/effort` per il modello in uso, e la prima richiesta al modello lo conferma o lo corregge.
+
 ## [0.16.0] - 2026-10-21
 
 ### Modificato
