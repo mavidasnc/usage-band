@@ -2,6 +2,15 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.17.3] - 2026-10-22
+
+### Corretto
+- Anche per 5h e 7g colore e barra seguono la percentuale arrotondata dell'etichetta: un 89,6% appare come «90%» in rosso, non più in giallo.
+- Se una risposta porta la percentuale mentre è ancora in corso la stima del contesto dopo una compattazione, la stima viene scartata: alla compattazione successiva `ctx` non mostra più quella cifra superata al posto dell'ultima vera.
+- Un ridisegno in cui Claude Code non fornisce i dati non riporta più `ctx` alla cifra di prima della compattazione.
+- Dopo un rewind fino all'inizio della conversazione `ctx` mostra n/d anche durante il turno che segue, fino alla prima risposta, invece della cifra di prima del rewind. Vale anche col doppio Esc, che non ridisegna la barra: lì n/d compare dal prompt successivo.
+- In una sessione che non ha ancora avuto una percentuale del contesto la barra non legge più tutti i messaggi a ogni ridisegno (ogni secondo durante il countdown della cache).
+
 ## [0.17.2] - 2026-10-22
 
 ### Corretto
@@ -11,7 +20,7 @@ Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 - Se il conteggio dei token non riesce, `ctx` mostra n/d invece della cifra di prima della compattazione.
 - Una stima che arriva dopo `/clear` o `/resume` non passa più alla sessione nuova.
 - La percentuale stimata è intera, così colore ed etichetta seguono la stessa soglia (prima un 89,6% appariva come «90%» ma giallo).
-- A ogni compattazione non compare più l'avviso «its session.compact hook was skipped»: il mod non registra più l'hook `session.compact`, che il plugin gestito `cc-plugin-sec-default` saltava sempre. I token del riassunto non entravano quindi già nel conteggio `tkn`.
+- A ogni compattazione non compare più l'avviso «its session.compact hook was skipped»: il mod non registra più l'hook `session.compact`, che il plugin gestito `cc-plugin-sec-default` saltava sempre. Dove quel plugin è attivo i token del riassunto non entravano già nel conteggio `tkn`; senza, da questa versione `tkn` non li conta più, mentre il costo li include ancora.
 
 ## [0.17.1] - 2026-10-22
 

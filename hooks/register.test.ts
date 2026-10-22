@@ -800,15 +800,18 @@ test("in una sessione nuova o ripresa l'effort viene dalle impostazioni prima de
 })
 
 // Il motore per i test del contesto: percentuale dell'ultima risposta (assente subito dopo una compattazione), messaggi correnti
-// e conteggio per categorie, che conta le chiamate, può fallire e può rispondere quando la sessione è già cambiata
+// (con le letture contate) e conteggio per categorie, che conta le chiamate, può fallire e può rispondere quando la sessione è
+// già cambiata; la lettura semplice dei dati può non rispondere
 const stubContext = (on: Parameters<TestBody>[1]) => {
   const engine = {
     sessionId: 's1',
     percent: 92 as number | undefined,
     used: 184000,
     messages: [] as unknown[],
+    messageReads: 0,
     counts: 0,
     isCountFailing: false,
+    isUsageFailing: false,
     sessionAfterCount: null as string | null,
   }
   on('session.start', () => ({ cwd: '' }))
@@ -819,7 +822,10 @@ const stubContext = (on: Parameters<TestBody>[1]) => {
   on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('session.messages', () => ({ value: engine.messages }) as never)
+  on('session.messages', () => {
+    engine.messageReads++
+    return { value: engine.messages } as never
+  })
   on('session.usage', (_$, e) => {
     if (e.breakdown) {
       engine.counts++
@@ -827,6 +833,8 @@ const stubContext = (on: Parameters<TestBody>[1]) => {
       if (engine.isCountFailing) {
         throw new Error('conteggio non disponibile')
       }
+    } else if (engine.isUsageFailing) {
+      throw new Error('dati non disponibili')
     }
     const breakdown = e.breakdown ? { breakdown: { totalTokens: engine.used } } : {}
     return { value: { startedAt: 0, context: { window: 200000, percent: engine.percent, ...breakdown }, rateLimits: [] } } as never
@@ -862,6 +870,11 @@ test('dopo una compattazione ctx stima il contesto dai messaggi, anche dopo una 
   await clock.settle()
   expect(engine.counts).toBe(1)
 
+  // Un disegno in cui il motore non risponde mostra la stima, non la cifra di prima della compattazione
+  engine.isUsageFailing = true
+  expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
+  engine.isUsageFailing = false
+
   // Una misura dei soli limiti, senza percentuale, lascia la stima
   await $.session.measure({ context: { window: 200000 }, rateLimits: [], changed: ['rateLimits'] } as never)
   expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
@@ -892,7 +905,7 @@ test('dopo una compattazione ctx stima il contesto dai messaggi, anche dopo una 
 test('dopo un rewind ctx mostra il contesto del punto scelto, e n/d tornando a una conversazione vuota', async ($, on) => {
   const engine = stubContext(on)
   const clock = mock.clock(on)
-  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  const mount = (props = PROPS) => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props })
   engine.messages = [
     message('user', 'Prima domanda'),
     message('assistant', 'Prima risposta'),
@@ -914,8 +927,24 @@ test('dopo un rewind ctx mostra il contesto del punto scelto, e n/d tornando a u
   engine.percent = undefined
   engine.messages = []
   expect(await (await mount()).find({ text: /ctx n\/d/ })).toBeDefined()
+
+  // Il prompt che segue: durante il turno resta n/d, non il 40% di prima del rewind. Senza attendere i timer: dal vivo una
+  // scrittura di stato partita dal disegno non arriva
+  engine.messages = [message('user', 'Nuova domanda')]
+  expect(await (await mount(WORKING)).find({ text: /ctx n\/d/ })).toBeDefined()
   await clock.settle()
   expect(engine.counts).toBe(0)
+
+  // Un turno interrotto prima della risposta: a barra ferma la stima della conversazione nuova prende il posto di n/d
+  engine.used = 10000
+  await mount()
+  await clock.settle()
+  expect(await (await mount()).find({ text: /ctx .* 5%/ })).toBeDefined()
+
+  // La risposta al prompt successivo porta la percentuale
+  engine.percent = 3
+  await $.session.measure({ context: { window: 200000, percent: 3 }, rateLimits: [], changed: ['context'] } as never)
+  expect(await (await mount()).find({ text: /ctx .* 3%/ })).toBeDefined()
 })
 
 test('se il conteggio dei token non riesce, dopo una compattazione ctx mostra n/d invece della cifra di prima', async ($, on) => {
@@ -979,4 +1008,90 @@ test('in una sessione che non ha ancora cifre ctx resta n/d senza contare i toke
   await clock.settle()
   expect(await (await mount()).find({ text: /ctx n\/d/ })).toBeDefined()
   expect(engine.counts).toBe(0)
+  // Nemmeno i messaggi vengono letti
+  expect(engine.messageReads).toBe(0)
+})
+
+test('una stima finita dopo la risposta che porta la percentuale non torna alla compattazione successiva', async ($, on) => {
+  const engine = stubContext(on)
+  const clock = mock.clock(on)
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  engine.messages = [message('user', 'Domanda'), message('assistant', 'Risposta')]
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  await mount()
+
+  // /compact: la stima parte da un timer, ma prima che il conteggio finisca arriva una risposta con la percentuale vera
+  engine.percent = undefined
+  engine.messages = [message('user', 'Riassunto')]
+  engine.used = 30000
+  await mount()
+  engine.percent = 12
+  await $.session.measure({ context: { window: 200000, percent: 12 }, rateLimits: [], changed: ['context'] } as never)
+  await clock.settle()
+  expect(engine.counts).toBe(1)
+  expect(await (await mount()).find({ text: /ctx .* 12%/ })).toBeDefined()
+
+  // Alla compattazione successiva, finché la stima nuova non arriva, vale il 12% vero e non il 15% della stima superata
+  engine.percent = undefined
+  engine.messages = [message('user', 'Altro riassunto')]
+  engine.used = 40000
+  expect(await (await mount()).find({ text: /ctx .* 12%/ })).toBeDefined()
+  await clock.settle()
+  expect(await (await mount()).find({ text: /ctx .* 20%/ })).toBeDefined()
+})
+
+test("dopo un rewind all'inizio ctx resta n/d nel turno che segue anche senza un disegno a barra ferma", async ($, on) => {
+  const engine = stubContext(on)
+  mock.clock(on)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  const mount = (props = PROPS) => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props })
+  const reply = async (percent: number) => {
+    engine.percent = percent
+    await $.session.measure({ context: { window: 200000, percent }, rateLimits: [], changed: ['context'] } as never)
+  }
+  engine.messages = [message('user', 'Domanda'), message('assistant', 'Risposta')]
+
+  await $.session.start(START)
+  await reply(16)
+  await mount()
+
+  // /rewind all'inizio, e il disegno che segue arriva mentre il motore risulta ancora al lavoro
+  engine.percent = undefined
+  engine.messages = []
+  expect(await (await mount(WORKING)).find({ text: /ctx n\/d/ })).toBeDefined()
+  engine.messages = [message('user', 'Nuova domanda')]
+  expect(await (await mount(WORKING)).find({ text: /ctx n\/d/ })).toBeDefined()
+  await reply(5)
+  expect(await (await mount()).find({ text: /ctx .* 5%/ })).toBeDefined()
+
+  // Doppio Esc fino all'inizio: nessun disegno. Il turno del prompt che segue parte con la conversazione vuota
+  engine.messages = [message('user', 'Domanda'), message('assistant', 'Risposta')]
+  await reply(16)
+  engine.percent = undefined
+  engine.messages = [message('user', 'Altra domanda')]
+  await $.turn.start({ text: 'Altra domanda', turnId: 't2' } as never)
+  expect(await (await mount(WORKING)).find({ text: /ctx n\/d/ })).toBeDefined()
+  await reply(4)
+  expect(await (await mount()).find({ text: /ctx .* 4%/ })).toBeDefined()
+})
+
+test('5h e 7g prendono il colore della percentuale arrotondata che mostrano', async ($, on) => {
+  const engine = stubContext(on)
+  engine.percent = 10
+
+  await $.session.start(START)
+  await $.session.measure({
+    context: { window: 200000, percent: 10 },
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 89.6 },
+      { kind: 'seven_day', percentUsed: 69.5 },
+    ],
+    changed: ['context', 'rateLimits'],
+  } as never)
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  expect((await ui.find({ type: 'Text', text: /^\S+ 90%$/ }))?.props.color).toBe('error')
+  expect((await ui.find({ type: 'Text', text: /^\S+ 70%$/ }))?.props.color).toBe('warning')
 })

@@ -189,6 +189,12 @@ let lastLimits: Pick<Snapshot, 'fiveHour' | 'sevenDay'> = {}
 // Stima del contesto avviata e non ancora finita, come «sessione:impronta»: i disegni nel frattempo non ne avviano un'altra uguale
 let estimating: string | null = null
 
+// Sessione la cui conversazione il disegno ha visto vuota senza percentuale (rewind all'inizio): ctx resta n/d anche nel turno
+// che segue, invece della cifra di prima del rewind, finché una risposta non porta la percentuale o una stima non la sostituisce.
+// Una variabile e non lo stato: una scrittura da un timer a 0 ms partito dal disegno arriva mentre la barra disegna ancora, e il
+// motore la rifiuta (dal vivo non è mai arrivata)
+let emptiedSession: string | null = null
+
 // Ultima email e versione note nel processo: stesso ripiego, letto dalla barra quando lo stato è vuoto
 let lastEmail: string | null = null
 let lastVersion: string | null = null
@@ -461,7 +467,8 @@ const messagesBasis = (messages: SessionMessage[]) => {
 
 // Stima il contesto dai messaggi correnti, per quando il motore non ha la percentuale perché la conversazione è appena stata
 // compattata. Il conteggio full usa l'API di conteggio token come /context; la percentuale è intera come quella del motore, null
-// se il conteggio non riesce (la barra mostra n/d, non la cifra di prima). Scartata se nel frattempo la sessione è cambiata
+// se il conteggio non riesce (la barra mostra n/d, non la cifra di prima). Scartata se nel frattempo la sessione è cambiata o
+// una risposta ha portato la percentuale
 const estimateContext = async ($: EngineInterface, sessionId: string, basis: string) => {
   try {
     const usage = await $.session.usage({ breakdown: 'full' }).catch(() => null)
@@ -469,16 +476,38 @@ const estimateContext = async ($: EngineInterface, sessionId: string, basis: str
     if ((await $.session.id().catch(() => null)) !== sessionId) {
       return
     }
+    // il conteggio dura qualche secondo: se intanto è arrivata la percentuale vera, la stima resterebbe per la compattazione dopo
+    if ((await $.session.usage().catch(() => null))?.context.percent !== undefined) {
+      return
+    }
     const percent =
       usage && used !== undefined && usage.context.window
         ? Math.round(Math.min(100, (used / usage.context.window) * 100))
         : null
+    // la conversazione non è più vuota: vale la stima nuova
+    if (emptiedSession === sessionId) {
+      emptiedSession = null
+    }
     await update($, contextEstimate, () => ({ percent, basis }))
     $.ui.invalidate('ui.render')
   } finally {
     if (estimating === `${sessionId}:${basis}`) {
       estimating = null
     }
+  }
+}
+
+// Il primo turno di una conversazione vuota (rewind all'inizio, anche col doppio Esc, che non ridisegna la barra): senza
+// percentuale e col solo prompt nuovo nei messaggi, fino alla risposta ctx non mostra la cifra di prima
+const markEmptied = async ($: EngineInterface) => {
+  const usage = await $.session.usage().catch(() => null)
+  if (!usage || usage.context.percent !== undefined) {
+    return
+  }
+  const messages = await $.session.messages().catch(() => null)
+  const sessionId = await $.session.id().catch(() => null)
+  if (messages?.length === 1 && sessionId !== null) {
+    emptiedSession = sessionId
   }
 }
 
@@ -494,31 +523,36 @@ const contextFor = async (
   sessionId: string | null,
   canEstimate: boolean,
 ) => {
-  if (!usage) {
-    return measured?.context
-  }
-  if (usage.context.percent !== undefined) {
-    return usage.context.percent
+  const percent = usage?.context.percent
+  if (percent !== undefined) {
+    return percent
   }
   const estimate = await read($, contextEstimate)
-  // durante un turno i messaggi crescono: l'ultima stima vale finché una risposta non porta la percentuale
-  const known = estimate ? (estimate.percent ?? undefined) : measured?.context
-  if (!canEstimate || sessionId === null) {
+  // durante un turno i messaggi crescono: l'ultima stima vale finché una risposta non porta la percentuale, e vale anche in un
+  // disegno in cui il motore non risponde. Dopo un rewind all'inizio non vale nessuna cifra di prima
+  const isEmptied = sessionId !== null && emptiedSession === sessionId
+  const known = isEmptied ? undefined : estimate ? (estimate.percent ?? undefined) : measured?.context
+  if (!usage || sessionId === null || (measured?.context === undefined && !estimate)) {
     return known
   }
   const messages = await $.session.messages().catch(() => null)
   if (!messages) {
     return known
   }
+  // conversazione vuota: n/d, anche in un disegno che il motore fa mentre risulta al lavoro
   if (messages.length === 0) {
+    emptiedSession = sessionId
     return undefined
+  }
+  if (!canEstimate) {
+    return known
   }
   const basis = messagesBasis(messages)
   if (estimate?.basis === basis) {
     return known
   }
   const key = `${sessionId}:${basis}`
-  if ((measured?.context !== undefined || estimate) && estimating !== key) {
+  if (estimating !== key) {
     estimating = key
     $.clock.after(0, () => {
       void estimateContext($, sessionId, basis).catch(() => undefined)
@@ -609,6 +643,7 @@ export const register: Register = on => {
     // sessione. Una misura con la percentuale sostituisce la stima della compattazione
     await update($, snapshot, s => ({ ...measured, context: measured.context ?? s?.context }))
     if (measured.context !== undefined) {
+      emptiedSession = null
       await update($, contextEstimate, () => null)
     }
 
@@ -632,6 +667,7 @@ export const register: Register = on => {
     // Un turno nuovo del loop principale: il modello della richiesta precedente non vale più finché non arriva la prima
     if (e.agentId === undefined) {
       await update($, stepModel, () => null)
+      await markEmptied($)
     }
     if (e.agentId === undefined && isUserPromptPending) {
       isUserPromptPending = false
@@ -754,19 +790,23 @@ export const register: Register = on => {
     const sessionText = sessionUsd !== null && sessionUsd > 0 ? costLabel(sessionUsd) : null
     const { Box, Button, Text } = $.ui.resolve(e)
 
-    // Un segmento: etichetta, barra e percentuale colorate, reset opzionale
-    const segment = (label: string, percent?: number, resetsAt?: string) =>
-      percent === undefined ? (
-        <Text dimColor>{label} n/d</Text>
-      ) : (
+    // Un segmento: etichetta, barra e percentuale colorate, reset opzionale. Colore e barra seguono la percentuale arrotondata
+    // dell'etichetta: un 89,6% è «90%» e rosso
+    const segment = (label: string, percent?: number, resetsAt?: string) => {
+      if (percent === undefined) {
+        return <Text dimColor>{label} n/d</Text>
+      }
+      const shown = Math.round(percent)
+      return (
         <Text>
           <Text dimColor>{label} </Text>
-          <Text color={colorFor(percent)}>
-            {gauge(percent)} {Math.round(percent)}%
+          <Text color={colorFor(shown)}>
+            {gauge(shown)} {shown}%
           </Text>
           {resetsAt ? <Text dimColor> ↻ {resetLabel(resetsAt)}</Text> : null}
         </Text>
       )
+    }
 
     // Tempo residuo della cache del prompt: n/d prima della prima richiesta, scaduta (in rosso) a zero; assente con la cache disattivata
     const cacheSegment =
