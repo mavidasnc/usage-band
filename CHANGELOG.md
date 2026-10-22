@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.17.1] - 2026-10-22
+
+### Corretto
+- Dopo `/compact`, `/rewind` e una compattazione automatica la voce `ctx` mostra subito il contesto rimasto, contato come fa `/context`, invece del valore di prima fino alla risposta successiva; una misura che aggiorna solo i limiti 5h/7g non lo riporta indietro.
+
 ## [0.17.0] - 2026-10-22
 
 ### Modificato

@@ -798,3 +798,85 @@ test("in una sessione nuova o ripresa l'effort viene dalle impostazioni prima de
   await clock.settle()
   expect(await (await mount()).find({ text: 'low' })).toBeDefined()
 })
+
+test('dopo /compact la barra mostra subito il contesto rimasto, finché una risposta non lo misura di nuovo', async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 92 }, rateLimits: [] } }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  // Il motore compatta: da 184k a 30k token, col riassunto al posto della conversazione
+  const summary = [{ role: 'user' as const, text: 'Riassunto', toolUses: [] }]
+  on('session.compact', () => ({ messages: summary, tokensBefore: 184000, tokensAfter: 30000 }))
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  expect(await (await mount()).find({ text: /ctx .* 92%/ })).toBeDefined()
+
+  await $.session.compact({ trigger: 'manual', messages: summary })
+  expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
+
+  // Una misura dei soli limiti riporta ancora la percentuale vecchia: la stima resta
+  await $.session.measure({ ...(MEASURE as object), changed: ['rateLimits'] } as never)
+  expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
+
+  // La risposta successiva misura il contesto vero
+  await $.session.measure({ ...(MEASURE as object), context: { window: 200000, percent: 18 }, changed: ['context'] } as never)
+  expect(await (await mount()).find({ text: /ctx .* 18%/ })).toBeDefined()
+})
+
+test("/compact e /rewind aggiornano ctx anche quando l'hook session.compact viene saltato", async ($, on) => {
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  const clock = mock.clock(on)
+  // La percentuale è quella dell'ultima risposta (assente subito dopo una compattazione), la stima per categorie conta i messaggi correnti
+  let percent: number | undefined = 92
+  let used = 184000
+  on('session.usage', (_$, e) => ({
+    value: {
+      startedAt: 0,
+      context: { window: 200000, percent, ...(e.breakdown ? { breakdown: { totalTokens: used } } : {}) },
+      rateLimits: [],
+    },
+  }) as never)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('command.run', () => ({ text: '' }))
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  const run = (command: string) => $.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: {} } as never)
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  expect(await (await mount()).find({ text: /ctx .* 92%/ })).toBeDefined()
+
+  // Il motore sostituisce i messaggi solo a comando finito: fino ad allora la barra resta com'è
+  await run('compact')
+  await clock.settle()
+  expect(await (await mount()).find({ text: /ctx .* 92%/ })).toBeDefined()
+  percent = undefined
+  used = 30000
+  await clock.advance(250)
+  expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
+
+  await run('rewind')
+  percent = 10
+  used = 20000
+  await clock.advance(250)
+  expect(await (await mount()).find({ text: /ctx .* 10%/ })).toBeDefined()
+
+  // Compattazione automatica: la misura arriva senza percentuale e la barra stima dai messaggi
+  used = 10000
+  await $.session.measure({ context: { window: 200000 }, rateLimits: [], changed: ['context'] } as never)
+  expect(await (await mount()).find({ text: /ctx .* 5%/ })).toBeDefined()
+
+  // La risposta successiva porta la lettura vera
+  await $.session.measure({ context: { window: 200000, percent: 12 }, rateLimits: [], changed: ['context'] } as never)
+  expect(await (await mount()).find({ text: /ctx .* 12%/ })).toBeDefined()
+})

@@ -175,6 +175,12 @@ const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]
 // e fa da ripiego finché la sessione nuova non ha una lettura sua
 let lastLimits: Pick<Snapshot, 'fiveHour' | 'sevenDay'> = {}
 
+// Contesto stimato dopo l'ultima compattazione del loop principale: il motore riporta la percentuale dell'ultima risposta,
+// ancora quella di prima, quindi la stima vale finché una misura non segnala il contesto mosso
+let compactedContext: number | undefined
+// Letture vere del contesto viste da session.measure: una stima arrivata dopo una lettura più recente viene scartata
+let contextReadings = 0
+
 // Ultima email e versione note nel processo: stesso ripiego, letto dalla barra quando lo stato è vuoto
 let lastEmail: string | null = null
 let lastVersion: string | null = null
@@ -432,10 +438,55 @@ const refreshEffort = async ($: EngineInterface, requested: string) => {
   }
 }
 
+// Stima il contesto dai messaggi correnti, per quando il motore non ha ancora la percentuale (subito dopo una compattazione
+// o un rewind). Il conteggio full usa l'API di conteggio token come /context: quello summary resta agganciato all'ultima
+// risposta e riporta ancora il contesto di prima
+const estimateContext = async ($: EngineInterface) => {
+  const readings = contextReadings
+  const usage = await $.session.usage({ breakdown: 'full' }).catch(() => null)
+  const used = usage?.context.breakdown?.totalTokens
+  if (!usage || used === undefined || !usage.context.window || readings !== contextReadings) {
+    return
+  }
+  const percent = Math.min(100, (used / usage.context.window) * 100)
+  compactedContext = percent
+  await update($, snapshot, s => ({ ...s, context: percent }))
+  $.ui.invalidate('ui.render')
+}
+
+// Intervallo, in millisecondi, tra due letture del contesto dopo /compact o /rewind
+const CONTEXT_POLL_MS = 250
+// Letture al massimo, circa 30 secondi: /rewind apre un pannello e il contesto cambia solo quando la persona sceglie
+const CONTEXT_POLL_LIMIT = 120
+
+// Il motore applica il risultato di /compact e /rewind solo a hook del comando finito (provato dal vivo: subito dopo next(e)
+// contesto e messaggi sono ancora quelli di prima). Rilegge a intervalli il contesto, una lettura che non costa nulla, e appena
+// differisce da quello di prima del comando (dopo una compattazione la percentuale manca) stima il contesto dai messaggi nuovi
+const estimateWhenChanged = ($: EngineInterface, before: SessionContextUsage | undefined) => {
+  const readings = contextReadings
+  let polls = 0
+  const poll = async () => {
+    polls++
+    const context = (await $.session.usage().catch(() => null))?.context
+    // una lettura vera arrivata nel frattempo vale più della stima
+    if (readings !== contextReadings) {
+      return
+    }
+    if (!before || (context && (context.percent !== before.percent || context.tokens !== before.tokens))) {
+      await estimateContext($)
+    } else if (polls < CONTEXT_POLL_LIMIT) {
+      $.clock.after(CONTEXT_POLL_MS, () => void poll().catch(() => undefined))
+    }
+  }
+  $.clock.after(0, () => void poll().catch(() => undefined))
+}
+
 // Riempie gli atom della sessione: misura corrente, versione del mod, effort ed email dell'account.
 // Serve all'avvio e quando il disegno della barra vede una sessione nuova (/clear, /resume, fork), che parte con lo stato vuoto
 // senza rifare session.start. I tre passi sono indipendenti: un errore in uno non ferma gli altri
 const fill = async ($: EngineInterface) => {
+  // sessione nuova: la stima della compattazione precedente non vale più
+  compactedContext = undefined
   try {
     const usage = await $.session.usage()
     const measured = toSnapshot(usage.context, usage.rateLimits)
@@ -510,7 +561,18 @@ export const register: Register = on => {
     if (measured.fiveHour || measured.sevenDay) {
       lastLimits = { fiveHour: measured.fiveHour, sevenDay: measured.sevenDay }
     }
-    await update($, snapshot, () => measured)
+    // Una misura che non muove il contesto (solo limiti o costo) riporta ancora la percentuale di prima della compattazione
+    // Subito dopo una compattazione (anche automatica) il motore non ha ancora la percentuale: resta il valore mostrato
+    // finché la stima dai messaggi non lo sostituisce
+    const moved = e.changed.includes('context')
+    if (moved && measured.context !== undefined) {
+      compactedContext = undefined
+      contextReadings++
+    }
+    await update($, snapshot, s => ({ ...measured, context: compactedContext ?? measured.context ?? s?.context }))
+    if (moved && measured.context === undefined) {
+      void estimateContext($)
+    }
 
     return next(e)
   })
@@ -562,10 +624,20 @@ export const register: Register = on => {
     return result
   })
 
-  // Anche il riassunto della compattazione consuma token: si sommano all'operazione in cui avviene
+  // Anche il riassunto della compattazione consuma token: si sommano all'operazione in cui avviene.
+  // Compattata la conversazione principale, la barra mostra subito il contesto rimasto, senza attendere la prossima risposta
   on('session.compact', async ($, e, next) => {
     const result = await next(e)
     await addUsage($, e.agentId, 'skip' in result ? undefined : result.usage)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && result.skip === undefined) {
+      const window = (await $.session.usage().catch(() => null))?.context.window
+      if (result.tokensAfter !== undefined && window) {
+        const percent = Math.min(100, (result.tokensAfter / window) * 100)
+        compactedContext = percent
+        await update($, snapshot, s => ({ ...s, context: percent }))
+        $.ui.invalidate('ui.render')
+      }
+    }
 
     return result
   })
@@ -607,6 +679,18 @@ export const register: Register = on => {
 
     return result
   })
+
+  // /compact e /rewind cambiano il contesto senza una risposta del modello, e un plugin gestito può saltare l'hook
+  // session.compact: quando il motore ha applicato il comando, la barra stima il contesto rimasto dai messaggi correnti
+  for (const command of ['compact', 'rewind']) {
+    on('command.run', { command }, async ($, e, next) => {
+      const before = (await $.session.usage().catch(() => null))?.context
+      const result = await next(e)
+      estimateWhenChanged($, before)
+
+      return result
+    })
+  }
 
   // La barra sopra il prompt
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
