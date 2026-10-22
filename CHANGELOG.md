@@ -2,6 +2,17 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.17.2] - 2026-10-22
+
+### Corretto
+- Dopo una compattazione la voce `ctx` mostra il contesto rimasto, contato dai messaggi come fa `/context`, anche dopo una seconda `/compact` di fila. Dopo una compattazione automatica a metà turno si aggiorna alla prima risposta che segue, non più solo a fine turno.
+- Durante un turno `ctx` segue la percentuale di ogni risposta del modello, non solo quella di fine turno.
+- Dopo un rewind, con `/rewind` o con doppio Esc, `ctx` mostra il contesto del punto scelto, che Claude Code ripristina da sé. Col doppio Esc compare al ridisegno successivo della barra. Tornando all'inizio della conversazione mostra n/d.
+- Se il conteggio dei token non riesce, `ctx` mostra n/d invece della cifra di prima della compattazione.
+- Una stima che arriva dopo `/clear` o `/resume` non passa più alla sessione nuova.
+- La percentuale stimata è intera, così colore ed etichetta seguono la stessa soglia (prima un 89,6% appariva come «90%» ma giallo).
+- A ogni compattazione non compare più l'avviso «its session.compact hook was skipped»: il mod non registra più l'hook `session.compact`, che il plugin gestito `cc-plugin-sec-default` saltava sempre. I token del riassunto non entravano quindi già nel conteggio `tkn`.
+
 ## [0.17.1] - 2026-10-22
 
 ### Corretto

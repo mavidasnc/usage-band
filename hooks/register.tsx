@@ -1,10 +1,21 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelUsage, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
+import type {
+  EngineInterface,
+  ModelUsage,
+  Register,
+  SessionContextUsage,
+  SessionMessage,
+  SessionRateLimit,
+  SessionUsage,
+} from 'claude-code'
 
 import type { Limit, Operation, Snapshot } from '../types'
 
 // Ultima misura dell'uso, letta dal disegno della barra
 const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
+
+// Contesto stimato dopo l'ultima compattazione; null se non ce n'è una o se una risposta ha riportato la percentuale vera
+const contextEstimate = atom({ plugin: 'usage-band', key: 'contextEstimate' } as const, null)
 
 // True quando la barra è nascosta con /usage-band
 const isHidden = atom({ plugin: 'usage-band', key: 'isHidden' } as const, false)
@@ -175,11 +186,8 @@ const toSnapshot = (context: SessionContextUsage, rateLimits: SessionRateLimit[]
 // e fa da ripiego finché la sessione nuova non ha una lettura sua
 let lastLimits: Pick<Snapshot, 'fiveHour' | 'sevenDay'> = {}
 
-// Contesto stimato dopo l'ultima compattazione del loop principale: il motore riporta la percentuale dell'ultima risposta,
-// ancora quella di prima, quindi la stima vale finché una misura non segnala il contesto mosso
-let compactedContext: number | undefined
-// Letture vere del contesto viste da session.measure: una stima arrivata dopo una lettura più recente viene scartata
-let contextReadings = 0
+// Stima del contesto avviata e non ancora finita, come «sessione:impronta»: i disegni nel frattempo non ne avviano un'altra uguale
+let estimating: string | null = null
 
 // Ultima email e versione note nel processo: stesso ripiego, letto dalla barra quando lo stato è vuoto
 let lastEmail: string | null = null
@@ -438,55 +446,91 @@ const refreshEffort = async ($: EngineInterface, requested: string) => {
   }
 }
 
-// Stima il contesto dai messaggi correnti, per quando il motore non ha ancora la percentuale (subito dopo una compattazione
-// o un rewind). Il conteggio full usa l'API di conteggio token come /context: quello summary resta agganciato all'ultima
-// risposta e riporta ancora il contesto di prima
-const estimateContext = async ($: EngineInterface) => {
-  const readings = contextReadings
-  const usage = await $.session.usage({ breakdown: 'full' }).catch(() => null)
-  const used = usage?.context.breakdown?.totalTokens
-  if (!usage || used === undefined || !usage.context.window || readings !== contextReadings) {
-    return
+// Impronta dei messaggi del loop principale: quanti sono e un hash (djb2) di ruoli e testi. Distingue due compattazioni di fila,
+// che possono lasciare lo stesso ultimo messaggio (provato dal vivo)
+const messagesBasis = (messages: SessionMessage[]) => {
+  let hash = 5381
+  for (const message of messages) {
+    const text = `${message.role}:${message.text}\n`
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash * 33 + text.charCodeAt(i)) | 0
+    }
   }
-  const percent = Math.min(100, (used / usage.context.window) * 100)
-  compactedContext = percent
-  await update($, snapshot, s => ({ ...s, context: percent }))
-  $.ui.invalidate('ui.render')
+  return `${messages.length}:${hash}`
 }
 
-// Intervallo, in millisecondi, tra due letture del contesto dopo /compact o /rewind
-const CONTEXT_POLL_MS = 250
-// Letture al massimo, circa 30 secondi: /rewind apre un pannello e il contesto cambia solo quando la persona sceglie
-const CONTEXT_POLL_LIMIT = 120
-
-// Il motore applica il risultato di /compact e /rewind solo a hook del comando finito (provato dal vivo: subito dopo next(e)
-// contesto e messaggi sono ancora quelli di prima). Rilegge a intervalli il contesto, una lettura che non costa nulla, e appena
-// differisce da quello di prima del comando (dopo una compattazione la percentuale manca) stima il contesto dai messaggi nuovi
-const estimateWhenChanged = ($: EngineInterface, before: SessionContextUsage | undefined) => {
-  const readings = contextReadings
-  let polls = 0
-  const poll = async () => {
-    polls++
-    const context = (await $.session.usage().catch(() => null))?.context
-    // una lettura vera arrivata nel frattempo vale più della stima
-    if (readings !== contextReadings) {
+// Stima il contesto dai messaggi correnti, per quando il motore non ha la percentuale perché la conversazione è appena stata
+// compattata. Il conteggio full usa l'API di conteggio token come /context; la percentuale è intera come quella del motore, null
+// se il conteggio non riesce (la barra mostra n/d, non la cifra di prima). Scartata se nel frattempo la sessione è cambiata
+const estimateContext = async ($: EngineInterface, sessionId: string, basis: string) => {
+  try {
+    const usage = await $.session.usage({ breakdown: 'full' }).catch(() => null)
+    const used = usage?.context.breakdown?.totalTokens
+    if ((await $.session.id().catch(() => null)) !== sessionId) {
       return
     }
-    if (!before || (context && (context.percent !== before.percent || context.tokens !== before.tokens))) {
-      await estimateContext($)
-    } else if (polls < CONTEXT_POLL_LIMIT) {
-      $.clock.after(CONTEXT_POLL_MS, () => void poll().catch(() => undefined))
+    const percent =
+      usage && used !== undefined && usage.context.window
+        ? Math.round(Math.min(100, (used / usage.context.window) * 100))
+        : null
+    await update($, contextEstimate, () => ({ percent, basis }))
+    $.ui.invalidate('ui.render')
+  } finally {
+    if (estimating === `${sessionId}:${basis}`) {
+      estimating = null
     }
   }
-  $.clock.after(0, () => void poll().catch(() => undefined))
+}
+
+// Contesto da mostrare. Vale la percentuale del motore, che dopo un rewind è già quella del punto scelto (provato dal vivo).
+// Senza percentuale, cioè subito dopo una compattazione: la stima dai messaggi, n/d a conversazione vuota (rewind all'inizio),
+// altrimenti l'ultima cifra nota. Con `canEstimate` (barra ferma, stessa sessione del disegno precedente), se i messaggi sono
+// cambiati dall'ultima stima ne avvia una nuova da un timer: il motore rifiuta le scritture di stato fatte mentre disegna.
+// Una sessione che non ha mai avuto una cifra (nuova o ripresa) resta a n/d, senza chiamate in più
+const contextFor = async (
+  $: EngineInterface,
+  usage: SessionUsage | null,
+  measured: Snapshot | null,
+  sessionId: string | null,
+  canEstimate: boolean,
+) => {
+  if (!usage) {
+    return measured?.context
+  }
+  if (usage.context.percent !== undefined) {
+    return usage.context.percent
+  }
+  const estimate = await read($, contextEstimate)
+  // durante un turno i messaggi crescono: l'ultima stima vale finché una risposta non porta la percentuale
+  const known = estimate ? (estimate.percent ?? undefined) : measured?.context
+  if (!canEstimate || sessionId === null) {
+    return known
+  }
+  const messages = await $.session.messages().catch(() => null)
+  if (!messages) {
+    return known
+  }
+  if (messages.length === 0) {
+    return undefined
+  }
+  const basis = messagesBasis(messages)
+  if (estimate?.basis === basis) {
+    return known
+  }
+  const key = `${sessionId}:${basis}`
+  if ((measured?.context !== undefined || estimate) && estimating !== key) {
+    estimating = key
+    $.clock.after(0, () => {
+      void estimateContext($, sessionId, basis).catch(() => undefined)
+    })
+  }
+  return known
 }
 
 // Riempie gli atom della sessione: misura corrente, versione del mod, effort ed email dell'account.
 // Serve all'avvio e quando il disegno della barra vede una sessione nuova (/clear, /resume, fork), che parte con lo stato vuoto
 // senza rifare session.start. I tre passi sono indipendenti: un errore in uno non ferma gli altri
 const fill = async ($: EngineInterface) => {
-  // sessione nuova: la stima della compattazione precedente non vale più
-  compactedContext = undefined
   try {
     const usage = await $.session.usage()
     const measured = toSnapshot(usage.context, usage.rateLimits)
@@ -561,17 +605,11 @@ export const register: Register = on => {
     if (measured.fiveHour || measured.sevenDay) {
       lastLimits = { fiveHour: measured.fiveHour, sevenDay: measured.sevenDay }
     }
-    // Una misura che non muove il contesto (solo limiti o costo) riporta ancora la percentuale di prima della compattazione
-    // Subito dopo una compattazione (anche automatica) il motore non ha ancora la percentuale: resta il valore mostrato
-    // finché la stima dai messaggi non lo sostituisce
-    const moved = e.changed.includes('context')
-    if (moved && measured.context !== undefined) {
-      compactedContext = undefined
-      contextReadings++
-    }
-    await update($, snapshot, s => ({ ...measured, context: compactedContext ?? measured.context ?? s?.context }))
-    if (moved && measured.context === undefined) {
-      void estimateContext($)
+    // Dopo una compattazione la misura (dei soli limiti o del costo) non ha la percentuale: resta l'ultima cifra vera della
+    // sessione. Una misura con la percentuale sostituisce la stima della compattazione
+    await update($, snapshot, s => ({ ...measured, context: measured.context ?? s?.context }))
+    if (measured.context !== undefined) {
+      await update($, contextEstimate, () => null)
     }
 
     return next(e)
@@ -624,24 +662,6 @@ export const register: Register = on => {
     return result
   })
 
-  // Anche il riassunto della compattazione consuma token: si sommano all'operazione in cui avviene.
-  // Compattata la conversazione principale, la barra mostra subito il contesto rimasto, senza attendere la prossima risposta
-  on('session.compact', async ($, e, next) => {
-    const result = await next(e)
-    await addUsage($, e.agentId, 'skip' in result ? undefined : result.usage)
-    if (e.agentId === undefined && e.trigger !== 'precompute' && result.skip === undefined) {
-      const window = (await $.session.usage().catch(() => null))?.context.window
-      if (result.tokensAfter !== undefined && window) {
-        const percent = Math.min(100, (result.tokensAfter / window) * 100)
-        compactedContext = percent
-        await update($, snapshot, s => ({ ...s, context: percent }))
-        $.ui.invalidate('ui.render')
-      }
-    }
-
-    return result
-  })
-
   // Ogni richiesta al modello porta l'effort in uso: lo registra per il loop principale e lascia passare tutto;
   // alla risposta somma i suoi token all'operazione
   on('turn.step', async function* ($, e, next) {
@@ -680,18 +700,6 @@ export const register: Register = on => {
     return result
   })
 
-  // /compact e /rewind cambiano il contesto senza una risposta del modello, e un plugin gestito può saltare l'hook
-  // session.compact: quando il motore ha applicato il comando, la barra stima il contesto rimasto dai messaggi correnti
-  for (const command of ['compact', 'rewind']) {
-    on('command.run', { command }, async ($, e, next) => {
-      const before = (await $.session.usage().catch(() => null))?.context
-      const result = await next(e)
-      estimateWhenChanged($, before)
-
-      return result
-    })
-  }
-
   // La barra sopra il prompt
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // Nascosta con /usage-band o sondaggio in corso: cede il posto (senza dati resta visibile con n/d)
@@ -699,8 +707,25 @@ export const register: Register = on => {
       return next(e)
     }
 
-    // Una sola lettura dei dati del motore, per il costo della sessione e il ripiego del contesto; null se non risponde
+    // Una sola lettura dei dati del motore, per il costo della sessione e il contesto; null se non risponde
     const usage = await $.session.usage().catch(() => null)
+
+    // Prima volta che si disegna una sessione (anche ripresa con /resume, che non rifà session.start): avvia il countdown.
+    // Se prima se ne disegnava un'altra la sessione è cambiata (/clear, /resume, fork) e lo stato riparte vuoto: lo riempie
+    // di nuovo, come session.start all'avvio. Lo fa da un timer, a disegno finito: il motore rifiuta le scritture di stato
+    // fatte mentre disegna
+    const sessionId = await $.session.id().catch(() => null)
+    const isNewSession = sessionId !== null && sessionId !== tickedSessionId
+    if (isNewSession) {
+      const isSessionChange = tickedSessionId !== null
+      tickedSessionId = sessionId
+      void scheduleCacheTick($)
+      if (isSessionChange) {
+        $.clock.after(0, () => {
+          void fill($).catch(() => undefined)
+        })
+      }
+    }
 
     // Dopo /clear, /resume o un fork lo stato della sessione è vuoto finché fill non lo riempie: il contesto e 5h/7g sono
     // quelli che il motore conosce già, altrimenti 5h/7g, versione ed email sono gli ultimi visti nel processo
@@ -708,7 +733,8 @@ export const register: Register = on => {
     const live = usage ? toSnapshot(usage.context, usage.rateLimits) : undefined
     const data: Snapshot = {
       ...measured,
-      context: measured?.context ?? usage?.context.percent,
+      // una stima solo a barra ferma, e non nel primo disegno di una sessione, che fill deve ancora riempire
+      context: await contextFor($, usage, measured, sessionId, !e.props.isWorking && !isNewSession),
       fiveHour: measured?.fiveHour ?? live?.fiveHour ?? lastLimits.fiveHour,
       sevenDay: measured?.sevenDay ?? live?.sevenDay ?? lastLimits.sevenDay,
     }
@@ -721,21 +747,6 @@ export const register: Register = on => {
     const account = (await read($, email)) ?? lastEmail
     const compact = (await read($, isCompact)) || lastCompact
     const cache = await cacheState($, false).catch(() => null)
-    // Prima volta che si disegna una sessione (anche ripresa con /resume, che non rifà session.start): avvia il countdown.
-    // Se prima se ne disegnava un'altra la sessione è cambiata (/clear, /resume, fork) e lo stato riparte vuoto: lo riempie
-    // di nuovo, come session.start all'avvio. Lo fa da un timer, a disegno finito: il motore rifiuta le scritture di stato
-    // fatte mentre disegna
-    const sessionId = await $.session.id().catch(() => null)
-    if (sessionId !== null && sessionId !== tickedSessionId) {
-      const isSessionChange = tickedSessionId !== null
-      tickedSessionId = sessionId
-      void scheduleCacheTick($)
-      if (isSessionChange) {
-        $.clock.after(0, () => {
-          void fill($).catch(() => undefined)
-        })
-      }
-    }
     const tokens = (await read($, operation)) ?? lastOperation
     const detailed = (await read($, isTokenDetailed)) || lastTokenDetailed
     // Costo dell'intera sessione: nullo dove il motore non lo conta, assente finché non c'è una richiesta pagata

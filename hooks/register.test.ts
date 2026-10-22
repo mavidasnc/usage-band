@@ -119,7 +119,7 @@ test('/usage-band nasconde e rimostra la barra', async ($, on) => {
 
 test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righe', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
@@ -150,7 +150,7 @@ test('su un terminale largo tutto sta su una riga, su uno stretto vanno due righ
 
 test("l'effort dell'ultima richiesta compare dopo il modello", async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ran(JSON.stringify({ email: 'maurizio@mavida.com' })))
@@ -280,7 +280,7 @@ test("se la misura non risponde all'avvio, versione ed email compaiono lo stesso
 test('il nome del modello è leggibile anche per ID datati, vecchio schema e contesto esteso', async ($, on) => {
   let model = ''
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: model }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ran('', 1))
@@ -304,7 +304,7 @@ test('il nome del modello è leggibile anche per ID datati, vecchio schema e con
 
 test('il pulsante nasconde e rimostra cartella, modello, effort, email e versione', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ran(JSON.stringify({ email: 'maurizio@mavida.com' })))
@@ -349,7 +349,7 @@ const stubEngine = (
   cost: { usd?: number } = {},
 ) => {
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ran('', 1))
@@ -648,7 +648,7 @@ test('durante un turno il modello è quello della richiesta in corso, a turno fi
 
 test('il clic sul contesto scrive nel prompt vuoto la richiesta di valutare /compact, senza inviarla', async ($, on) => {
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ran('', 1))
@@ -799,84 +799,184 @@ test("in una sessione nuova o ripresa l'effort viene dalle impostazioni prima de
   expect(await (await mount()).find({ text: 'low' })).toBeDefined()
 })
 
-test('dopo /compact la barra mostra subito il contesto rimasto, finché una risposta non lo misura di nuovo', async ($, on) => {
+// Il motore per i test del contesto: percentuale dell'ultima risposta (assente subito dopo una compattazione), messaggi correnti
+// e conteggio per categorie, che conta le chiamate, può fallire e può rispondere quando la sessione è già cambiata
+const stubContext = (on: Parameters<TestBody>[1]) => {
+  const engine = {
+    sessionId: 's1',
+    percent: 92 as number | undefined,
+    used: 184000,
+    messages: [] as unknown[],
+    counts: 0,
+    isCountFailing: false,
+    sessionAfterCount: null as string | null,
+  }
   on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.id', () => ({ value: engine.sessionId }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
   on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
   on('command.register', () => ({ value: { command: 'usage-band' } }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: 92 }, rateLimits: [] } }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
-  // Il motore compatta: da 184k a 30k token, col riassunto al posto della conversazione
-  const summary = [{ role: 'user' as const, text: 'Riassunto', toolUses: [] }]
-  on('session.compact', () => ({ messages: summary, tokensBefore: 184000, tokensAfter: 30000 }))
-  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  on('session.messages', () => ({ value: engine.messages }) as never)
+  on('session.usage', (_$, e) => {
+    if (e.breakdown) {
+      engine.counts++
+      engine.sessionId = engine.sessionAfterCount ?? engine.sessionId
+      if (engine.isCountFailing) {
+        throw new Error('conteggio non disponibile')
+      }
+    }
+    const breakdown = e.breakdown ? { breakdown: { totalTokens: engine.used } } : {}
+    return { value: { startedAt: 0, context: { window: 200000, percent: engine.percent, ...breakdown }, rateLimits: [] } } as never
+  })
+  return engine
+}
 
-  await $.session.start(START)
-  await $.session.measure(MEASURE)
-  expect(await (await mount()).find({ text: /ctx .* 92%/ })).toBeDefined()
+// Un messaggio come lo dà $.session.messages()
+const message = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
 
-  await $.session.compact({ trigger: 'manual', messages: summary })
-  expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
+// Proprietà della band durante un turno
+const WORKING = { hasSurvey: false, isWorking: true, maxRows: 10 } as never
 
-  // Una misura dei soli limiti riporta ancora la percentuale vecchia: la stima resta
-  await $.session.measure({ ...(MEASURE as object), changed: ['rateLimits'] } as never)
-  expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
-
-  // La risposta successiva misura il contesto vero
-  await $.session.measure({ ...(MEASURE as object), context: { window: 200000, percent: 18 }, changed: ['context'] } as never)
-  expect(await (await mount()).find({ text: /ctx .* 18%/ })).toBeDefined()
-})
-
-test("/compact e /rewind aggiornano ctx anche quando l'hook session.compact viene saltato", async ($, on) => {
-  on('session.start', () => ({ cwd: '' }))
-  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
-  on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' })))
-  on('command.register', () => ({ value: { command: 'usage-band' } }))
+test('dopo una compattazione ctx stima il contesto dai messaggi, anche dopo una seconda di fila, finché una risposta non porta la percentuale', async ($, on) => {
+  const engine = stubContext(on)
   const clock = mock.clock(on)
-  // La percentuale è quella dell'ultima risposta (assente subito dopo una compattazione), la stima per categorie conta i messaggi correnti
-  let percent: number | undefined = 92
-  let used = 184000
-  on('session.usage', (_$, e) => ({
-    value: {
-      startedAt: 0,
-      context: { window: 200000, percent, ...(e.breakdown ? { breakdown: { totalTokens: used } } : {}) },
-      rateLimits: [],
-    },
-  }) as never)
-  on('session.measure', (_$, e) => ({ changed: e.changed }))
-  on('command.run', () => ({ text: '' }))
-  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
-  const run = (command: string) => $.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: {} } as never)
+  const mount = (props = PROPS) => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props })
+  engine.messages = [message('user', 'Prima domanda'), message('assistant', 'Prima risposta')]
 
   await $.session.start(START)
   await $.session.measure(MEASURE)
   expect(await (await mount()).find({ text: /ctx .* 92%/ })).toBeDefined()
 
-  // Il motore sostituisce i messaggi solo a comando finito: fino ad allora la barra resta com'è
-  await run('compact')
+  // /compact: il motore non ha più la percentuale e i messaggi sono il riassunto. La barra si ridisegna da sé e stima da un timer
+  engine.percent = undefined
+  engine.messages = [message('user', 'Riassunto'), message('user', 'Compattato')]
+  engine.used = 30000
+  await mount()
   await clock.settle()
-  expect(await (await mount()).find({ text: /ctx .* 92%/ })).toBeDefined()
-  percent = undefined
-  used = 30000
-  await clock.advance(250)
+  expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
+  // Altri disegni della stessa conversazione non contano di nuovo
+  await mount()
+  await clock.settle()
+  expect(engine.counts).toBe(1)
+
+  // Una misura dei soli limiti, senza percentuale, lascia la stima
+  await $.session.measure({ context: { window: 200000 }, rateLimits: [], changed: ['rateLimits'] } as never)
   expect(await (await mount()).find({ text: /ctx .* 15%/ })).toBeDefined()
 
-  await run('rewind')
-  percent = 10
-  used = 20000
-  await clock.advance(250)
-  expect(await (await mount()).find({ text: /ctx .* 10%/ })).toBeDefined()
+  // Un'altra /compact subito dopo, con lo stesso ultimo messaggio: una stima nuova, intera come l'etichetta e del colore della
+  // sua soglia (l'89,6% è 90%, rosso)
+  engine.messages = [message('user', 'Riassunto più ricco'), message('user', 'Compattato')]
+  engine.used = 179200
+  await mount()
+  await clock.settle()
+  const ui = await mount()
+  expect(await ui.find({ text: /ctx .* 90%/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^\S+ 90%$/ }))?.props.color).toBe('error')
+  expect(engine.counts).toBe(2)
 
-  // Compattazione automatica: la misura arriva senza percentuale e la barra stima dai messaggi
-  used = 10000
-  await $.session.measure({ context: { window: 200000 }, rateLimits: [], changed: ['context'] } as never)
-  expect(await (await mount()).find({ text: /ctx .* 5%/ })).toBeDefined()
+  // Durante il turno successivo la stima resta, senza altri conteggi
+  engine.messages = [...engine.messages, message('user', 'Nuova domanda')]
+  expect(await (await mount(WORKING)).find({ text: /ctx .* 90%/ })).toBeDefined()
+  await clock.settle()
+  expect(engine.counts).toBe(2)
 
-  // La risposta successiva porta la lettura vera
+  // La risposta porta la percentuale vera, che sostituisce la stima
+  engine.percent = 12
   await $.session.measure({ context: { window: 200000, percent: 12 }, rateLimits: [], changed: ['context'] } as never)
   expect(await (await mount()).find({ text: /ctx .* 12%/ })).toBeDefined()
+})
+
+test('dopo un rewind ctx mostra il contesto del punto scelto, e n/d tornando a una conversazione vuota', async ($, on) => {
+  const engine = stubContext(on)
+  const clock = mock.clock(on)
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  engine.messages = [
+    message('user', 'Prima domanda'),
+    message('assistant', 'Prima risposta'),
+    message('user', 'Seconda domanda'),
+    message('assistant', 'Seconda risposta'),
+  ]
+  engine.percent = 40
+
+  await $.session.start(START)
+  await $.session.measure({ context: { window: 200000, percent: 40 }, rateLimits: [], changed: ['context'] } as never)
+  expect(await (await mount()).find({ text: /ctx .* 40%/ })).toBeDefined()
+
+  // Il rewind (con /rewind o doppio Esc) non porta misure: il motore ha già la percentuale del punto scelto
+  engine.percent = 39
+  engine.messages = engine.messages.slice(0, 2)
+  expect(await (await mount()).find({ text: /ctx .* 39%/ })).toBeDefined()
+
+  // Fino all'inizio: né percentuale né messaggi, come in una sessione nuova
+  engine.percent = undefined
+  engine.messages = []
+  expect(await (await mount()).find({ text: /ctx n\/d/ })).toBeDefined()
+  await clock.settle()
+  expect(engine.counts).toBe(0)
+})
+
+test('se il conteggio dei token non riesce, dopo una compattazione ctx mostra n/d invece della cifra di prima', async ($, on) => {
+  const engine = stubContext(on)
+  const clock = mock.clock(on)
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  engine.messages = [message('user', 'Domanda'), message('assistant', 'Risposta')]
+  engine.isCountFailing = true
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  expect(await (await mount()).find({ text: /ctx .* 92%/ })).toBeDefined()
+
+  engine.percent = undefined
+  engine.messages = [message('user', 'Riassunto')]
+  await mount()
+  await clock.settle()
+  expect(await (await mount()).find({ text: /ctx n\/d/ })).toBeDefined()
+  // Nessun nuovo tentativo sulla stessa conversazione
+  await clock.settle()
+  expect(engine.counts).toBe(1)
+})
+
+test('una stima finita dopo /clear o /resume non passa alla sessione nuova', async ($, on) => {
+  const engine = stubContext(on)
+  const clock = mock.clock(on)
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  engine.messages = [message('user', 'Domanda'), message('assistant', 'Risposta')]
+
+  await $.session.start(START)
+  await $.session.measure(MEASURE)
+  await mount()
+
+  // /compact, e il conteggio risponde quando la sessione è già un'altra
+  engine.percent = undefined
+  engine.messages = [message('user', 'Riassunto')]
+  engine.used = 30000
+  engine.sessionAfterCount = 's2'
+  await mount()
+  await clock.settle()
+  expect(engine.counts).toBe(1)
+
+  // La sessione nuova, riempita da fill, non ha cifre: n/d, senza la stima della vecchia e senza contarne una sua
+  await mount()
+  await clock.settle()
+  expect(await (await mount()).find({ text: /ctx n\/d/ })).toBeDefined()
+  await clock.settle()
+  expect(engine.counts).toBe(1)
+})
+
+test('in una sessione che non ha ancora cifre ctx resta n/d senza contare i token', async ($, on) => {
+  const engine = stubContext(on)
+  const clock = mock.clock(on)
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  engine.percent = undefined
+  engine.messages = [message('user', 'Prima domanda')]
+
+  await $.session.start(START)
+  await mount()
+  await mount()
+  await clock.settle()
+  expect(await (await mount()).find({ text: /ctx n\/d/ })).toBeDefined()
+  expect(engine.counts).toBe(0)
 })
