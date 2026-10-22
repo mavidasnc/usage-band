@@ -48,16 +48,6 @@ const BAR_WIDTH = 10
 
 const DAYS = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']
 
-// Pannelli aperti dal clic su modello ed effort, per cambiarli senza scrivere comandi
-const MODEL_PANE = 'usage-band-model'
-const EFFORT_PANE = 'usage-band-effort'
-
-// Livelli che /effort accetta, dal più leggero al più profondo
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
-
-// Tasto di una scelta nei pannelli: 1…9, 0 per la decima, nessuno oltre
-const choiceHotkey = (index: number) => (index < 9 ? String(index + 1) : index === 9 ? '0' : undefined)
-
 // Colore per soglia, con le chiavi del tema: verde < 70, giallo 70-90, rosso >= 90
 const colorFor = (percent: number) =>
   percent >= 90 ? 'error' : percent >= 70 ? 'warning' : 'success'
@@ -608,7 +598,7 @@ export const register: Register = on => {
     return { text: hidden ? 'Barra di uso nascosta.' : 'Barra di uso visibile.' }
   })
 
-  // Un /effort scritto a mano (quello del pannello non passa dagli hook del mod, che ne legge la risposta da sé)
+  // Un /effort scritto a mano (quello del clic sulla barra non passa dagli hook del mod, che ne rilegge l'effort da sé)
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const result = await next(e)
     if (e.args.trim() !== '') {
@@ -616,69 +606,6 @@ export const register: Register = on => {
     }
 
     return result
-  })
-
-  // Pannello del modello: le scelte della riga Model di /config, una per riga; la scelta la cambia come farebbe il menu,
-  // senza comandi nella chat
-  on('ui.render', { component: 'Pane', requestId: MODEL_PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
-    const row = (await $.config.list()).find(r => r.key === 'model')
-    if (!row?.options?.length) {
-      return <Text dimColor>Il modello non si può cambiare da qui: usa /model</Text>
-    }
-    const current = String(row.value)
-
-    return (
-      <Box flexDirection="column">
-        {row.options.map((value, index) => (
-          <Button
-            key={`model:${value}`}
-            label={value === current ? `${value} ✓` : value}
-            hotkey={choiceHotkey(index)}
-            plain
-            autoFocus={value === current || undefined}
-            onPress={async () => {
-              const { deny } = await $.config.set({ key: 'model', value })
-              if (deny !== undefined) {
-                $.ui.toast(`Modello non cambiato: ${deny}`)
-              }
-              await $.ui.close({ id: MODEL_PANE })
-            }}
-          />
-        ))}
-      </Box>
-    )
-  })
-
-  // Pannello dell'effort: non ha una riga in /config, quindi la scelta esegue /effort <livello> (che lascia una riga nella chat).
-  // Finito il comando, la barra rilegge il livello in vigore (refreshEffort)
-  on('ui.render', { component: 'Pane', requestId: EFFORT_PANE }, async ($, e) => {
-    const { Box, Button } = $.ui.resolve(e)
-    const level = await read($, effort)
-    const current = level === null ? null : String(level)
-
-    return (
-      <Box flexDirection="column">
-        {EFFORT_LEVELS.map((value, index) => (
-          <Button
-            key={`effort:${value}`}
-            label={value === current ? `${value} ✓` : value}
-            hotkey={choiceHotkey(index)}
-            plain
-            autoFocus={value === current || undefined}
-            onPress={async () => {
-              await $.ui.close({ id: EFFORT_PANE })
-              // Il motore esegue il comando solo a sessione ferma, cioè dopo questo clic: attenderlo qui bloccherebbe il clic,
-              // quindi la barra si aggiorna quando arriva la risposta
-              void $.command.run({ command: 'effort', args: value }).then(
-                () => refreshEffort($, value),
-                () => $.ui.toast(`Impossibile eseguire /effort ${value}`),
-              )
-            }}
-          />
-        ))}
-      </Box>
-    )
   })
 
   // La barra sopra il prompt
@@ -818,17 +745,20 @@ export const register: Register = on => {
     // Costo della sessione, subito dopo i token: solo il valore, non cliccabile, in rosa (bashBorder) per distinguerlo dalle altre voci
     const sessionItem = sessionText ? <Text color="bashBorder">{sessionText}</Text> : null
 
-    // Apre il pannello di scelta, con la tastiera già sulla lista; Esc lo chiude senza cambiare nulla
-    const openPane = async (id: string, title: string, rows: number) => {
-      const opened = await $.ui.open({ id, title, focus: true, closeOnEscape: true, rows })
-      if (!opened.isPlaced) {
-        $.ui.toast(`Impossibile aprire il pannello: ${opened.reason}`)
-      }
+    // Esegue un comando slash come se la persona lo avesse digitato, senza toccare la bozza nel prompt: /model e /effort senza
+    // argomenti aprono la schermata di scelta del motore. Finito, la barra rilegge l'effort in vigore dalle impostazioni (anche il
+    // modello nuovo può averne uno diverso); se il motore lo rifiuta, un avviso. Non attende il comando: il motore lo esegue solo
+    // a sessione ferma, cioè dopo questo clic
+    const runCommand = (command: string) => {
+      void $.command.run({ command }).then(
+        () => refreshEffort($, ''),
+        () => $.ui.toast(`Impossibile eseguire /${command}`),
+      )
     }
 
     // Riga dell'ambiente: token, costo della sessione, cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione
     // del mod (verde acqua); token, costo, effort, email e versione compaiono quando sono noti. Modello ed effort sono pulsanti che
-    // aprono il pannello per cambiarli, quindi stanno fuori dai Text
+    // eseguono /model e /effort, quindi stanno fuori dai Text
     const envRow = (
       <Box>
         {tokenItem}
@@ -839,14 +769,12 @@ export const register: Register = on => {
           <Text color="warning">{folder}</Text>
           <Text dimColor> │ </Text>
         </Text>
-        <Button key="model" label={model} plain onPress={async () =>
-            openPane(MODEL_PANE, 'Modello', (await $.config.list()).find(r => r.key === 'model')?.options?.length ?? 10)
-          }>
+        <Button key="model" label={model} plain onPress={() => runCommand('model')}>
           <Text color="claude">{model}</Text>
         </Button>
         {level !== null ? <Text dimColor> │ </Text> : null}
         {level !== null ? (
-          <Button key="effort" label={String(level)} plain onPress={() => openPane(EFFORT_PANE, 'Effort', EFFORT_LEVELS.length)}>
+          <Button key="effort" label={String(level)} plain onPress={() => runCommand('effort')}>
             <Text color="autoAccept">{level}</Text>
           </Button>
         ) : null}

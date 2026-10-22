@@ -2,6 +2,14 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.17.0] - 2026-10-22
+
+### Modificato
+- Un clic sul modello o sull'effort esegue di nuovo `/model` o `/effort`, che aprono la schermata di scelta di Claude Code, al posto del pannello del mod; la bozza nel prompt resta intatta e, finito il comando, la barra mostra l'effort in vigore (anche dopo un cambio di modello). Se il comando non può partire compare un avviso.
+
+### Rimosso
+- I pannelli di scelta del modello e dell'effort introdotti nella 0.16.0.
+
 ## [0.16.1] - 2026-10-21
 
 ### Corretto

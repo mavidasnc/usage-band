@@ -28,13 +28,11 @@ L'immagine è un'illustrazione con valori di esempio.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
 - **modello**: il nome leggibile del modello in uso (`Opus 5.5`, non `claude-opus-5-5`), in arancio;
   durante un turno mostra il modello della richiesta in corso (con `opusplan` in plan mode, ad esempio, `Opus 5.5`).
-  Un clic apre il pannello del modello: le scelte della riga Model di `/config`, una per riga, quella attuale con ✓.
-  Si sceglie con il tasto numerico della riga, con un clic o con Tab e Invio; Esc chiude.
-  Non esegue comandi e non tocca ciò che si sta scrivendo nel prompt.
+  Un clic esegue `/model`, che apre la schermata di scelta del modello, senza toccare ciò che si sta scrivendo nel prompt.
 - **effort**: l'effort in uso, solo il livello (`low`, `medium`, `high`, `xhigh`, `max`), in viola. All'avvio, dopo `/clear` e dopo
   `/resume` viene dalle impostazioni salvate da `/effort` per il modello in uso; poi dalle richieste al modello, che lo
-  confermano (e lo tolgono per i modelli senza effort). Un clic apre il pannello dell'effort, uguale a quello del modello:
-  la scelta esegue `/effort <livello>`, che lascia una riga nella conversazione e lo salva come predefinito per le sessioni nuove.
+  confermano (e lo tolgono per i modelli senza effort). Un clic esegue `/effort`, che apre la schermata di scelta
+  dell'effort; finito il comando, la barra mostra il livello in vigore.
 - **email**: l'account corrente, in azzurro, ricavata all'avvio con `claude auth status`
   (serve `claude` nel `PATH`; altrimenti viene dal file di configurazione di Claude Code, `.claude.json`).
 - **versione**: versione del mod (`vX.Y.Z`), in verde acqua.

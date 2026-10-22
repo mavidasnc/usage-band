@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "description": "Barra sopra il prompt con % limite 5h, % limite settimanale e % contesto, colorate per soglia.",
   "author": { "name": "Maurizio Pelizzone" },
   "types": "./types/index.d.ts"
