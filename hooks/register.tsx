@@ -195,6 +195,9 @@ let estimating: string | null = null
 // motore la rifiuta (dal vivo non è mai arrivata)
 let emptiedSession: string | null = null
 
+// Contatore delle misure con la percentuale: una stima partita prima dell'ultima è superata e non si scrive
+let contextMeasures = 0
+
 // Ultima email e versione note nel processo: stesso ripiego, letto dalla barra quando lo stato è vuoto
 let lastEmail: string | null = null
 let lastVersion: string | null = null
@@ -470,6 +473,7 @@ const messagesBasis = (messages: SessionMessage[]) => {
 // se il conteggio non riesce (la barra mostra n/d, non la cifra di prima). Scartata se nel frattempo la sessione è cambiata o
 // una risposta ha portato la percentuale
 const estimateContext = async ($: EngineInterface, sessionId: string, basis: string) => {
+  const measuresAtStart = contextMeasures
   try {
     const usage = await $.session.usage({ breakdown: 'full' }).catch(() => null)
     const used = usage?.context.breakdown?.totalTokens
@@ -484,11 +488,19 @@ const estimateContext = async ($: EngineInterface, sessionId: string, basis: str
       usage && used !== undefined && usage.context.window
         ? Math.round(Math.min(100, (used / usage.context.window) * 100))
         : null
-    // la conversazione non è più vuota: vale la stima nuova
-    if (emptiedSession === sessionId) {
+    // il controllo sta dentro la scrittura: una misura arrivata dopo la lettura qui sopra non viene sovrascritta
+    let isWritten = false
+    await update($, contextEstimate, current => {
+      if (contextMeasures !== measuresAtStart) {
+        return current
+      }
+      isWritten = true
+      return { percent, basis }
+    })
+    // la conversazione non è più vuota: vale la stima nuova, solo se scritta (una scrittura rifiutata lascia n/d)
+    if (isWritten && emptiedSession === sessionId) {
       emptiedSession = null
     }
-    await update($, contextEstimate, () => ({ percent, basis }))
     $.ui.invalidate('ui.render')
   } finally {
     if (estimating === `${sessionId}:${basis}`) {
@@ -498,15 +510,27 @@ const estimateContext = async ($: EngineInterface, sessionId: string, basis: str
 }
 
 // Il primo turno di una conversazione vuota (rewind all'inizio, anche col doppio Esc, che non ridisegna la barra): senza
-// percentuale e col solo prompt nuovo nei messaggi, fino alla risposta ctx non mostra la cifra di prima
-const markEmptied = async ($: EngineInterface) => {
+// percentuale e con nei messaggi al più il prompt nuovo, fino alla risposta ctx non mostra la cifra di prima. Il prompt deve
+// essere quel messaggio: dopo una compattazione resta anche lì un messaggio solo, il riassunto. Un turno senza testo (notifica
+// di un agente, ripartenza) non svuota nulla
+const markEmptied = async ($: EngineInterface, prompt: string) => {
+  const text = prompt.trim()
+  if (!text) {
+    return
+  }
   const usage = await $.session.usage().catch(() => null)
   if (!usage || usage.context.percent !== undefined) {
     return
   }
   const messages = await $.session.messages().catch(() => null)
   const sessionId = await $.session.id().catch(() => null)
-  if (messages?.length === 1 && sessionId !== null) {
+  if (!messages || sessionId === null) {
+    return
+  }
+  // vale anche se il prompt non è ancora tra i messaggi; nel messaggio il testo può avere altri blocchi uniti
+  const first = messages[0]
+  const isPromptOnly = messages.length === 0 || (messages.length === 1 && first?.role === 'user' && first.text.includes(text))
+  if (isPromptOnly) {
     emptiedSession = sessionId
   }
 }
@@ -643,6 +667,7 @@ export const register: Register = on => {
     // sessione. Una misura con la percentuale sostituisce la stima della compattazione
     await update($, snapshot, s => ({ ...measured, context: measured.context ?? s?.context }))
     if (measured.context !== undefined) {
+      contextMeasures++
       emptiedSession = null
       await update($, contextEstimate, () => null)
     }
@@ -667,7 +692,7 @@ export const register: Register = on => {
     // Un turno nuovo del loop principale: il modello della richiesta precedente non vale più finché non arriva la prima
     if (e.agentId === undefined) {
       await update($, stepModel, () => null)
-      await markEmptied($)
+      await markEmptied($, e.text)
     }
     if (e.agentId === undefined && isUserPromptPending) {
       isUserPromptPending = false

@@ -2,6 +2,14 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.17.4] - 2026-10-28
+
+### Corretto
+- Dopo una compattazione, un turno senza testo (la notifica di un agente in background) o un prompt che parte prima di comparire tra i messaggi non porta più `ctx` a n/d: un messaggio solo nella conversazione vale come «conversazione vuota» solo se è il prompt nuovo, non il riassunto.
+- Dopo un rewind all'inizio col doppio Esc, `ctx` resta n/d anche se il turno del prompt nuovo parte prima che il prompt compaia tra i messaggi.
+- Se una risposta porta la percentuale del contesto proprio mentre la stima dopo una compattazione la sta controllando, la stima non la sovrascrive più: alla compattazione successiva vale l'ultima cifra vera.
+- Se il salvataggio della stima non riesce, dopo un rewind all'inizio `ctx` resta n/d invece di tornare alla cifra di prima del rewind.
+
 ## [0.17.3] - 2026-10-22
 
 ### Corretto
