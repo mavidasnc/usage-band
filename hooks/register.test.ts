@@ -938,8 +938,11 @@ test('dopo un rewind ctx mostra il contesto del punto scelto, e n/d tornando a u
 
   // Il prompt che segue: durante il turno resta n/d, non il 40% di prima del rewind. Senza attendere i timer: dal vivo una
   // scrittura di stato partita dal disegno non arriva
+  // Durante il turno n/d è già deciso: i messaggi non si rileggono
   engine.messages = [message('user', 'Nuova domanda')]
+  const readsBefore = engine.messageReads
   expect(await (await mount(WORKING)).find({ text: /ctx n\/d/ })).toBeDefined()
+  expect(engine.messageReads).toBe(readsBefore)
   await clock.settle()
   expect(engine.counts).toBe(0)
 
@@ -1006,11 +1009,14 @@ test('una stima finita dopo /clear o /resume non passa alla sessione nuova', asy
 test('in una sessione che non ha ancora cifre ctx resta n/d senza contare i token', async ($, on) => {
   const engine = stubContext(on)
   const clock = mock.clock(on)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
   engine.percent = undefined
   engine.messages = [message('user', 'Prima domanda')]
 
   await $.session.start(START)
+  // Il primo turno non cerca una conversazione svuotata: senza cifre non c'è nulla da nascondere
+  await $.turn.start({ text: 'Prima domanda', turnId: 't1' } as never)
   await mount()
   await mount()
   await clock.settle()

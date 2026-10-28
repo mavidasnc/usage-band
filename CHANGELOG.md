@@ -2,6 +2,12 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.17.5] - 2026-10-28
+
+### Modificato
+- Durante un turno in cui `ctx` è già n/d (dopo un rewind all'inizio, o se la stima non è riuscita) la barra non rilegge più tutta la conversazione a ogni ridisegno.
+- All'inizio di ogni turno di una sessione che non ha ancora una percentuale del contesto (nuova o ripresa) il mod non legge più tutti i messaggi; dove servono, messaggi e id della sessione si leggono insieme, senza attendere uno dopo l'altro.
+
 ## [0.17.4] - 2026-10-28
 
 ### Corretto

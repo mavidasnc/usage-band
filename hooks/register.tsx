@@ -192,7 +192,8 @@ let estimating: string | null = null
 // Sessione la cui conversazione il disegno ha visto vuota senza percentuale (rewind all'inizio): ctx resta n/d anche nel turno
 // che segue, invece della cifra di prima del rewind, finché una risposta non porta la percentuale o una stima non la sostituisce.
 // Una variabile e non lo stato: una scrittura da un timer a 0 ms partito dal disegno arriva mentre la barra disegna ancora, e il
-// motore la rifiuta (dal vivo non è mai arrivata)
+// motore la rifiuta (dal vivo non è mai arrivata). Si perde a un reload del mod, ma il reload a caldo arriva a fine turno e il segno
+// torna da sé: il disegno lo rimette vedendo la conversazione vuota, turn.start al prompt che segue
 let emptiedSession: string | null = null
 
 // Contatore delle misure con la percentuale: una stima partita prima dell'ultima è superata e non si scrive
@@ -512,7 +513,8 @@ const estimateContext = async ($: EngineInterface, sessionId: string, basis: str
 // Il primo turno di una conversazione vuota (rewind all'inizio, anche col doppio Esc, che non ridisegna la barra): senza
 // percentuale e con nei messaggi al più il prompt nuovo, fino alla risposta ctx non mostra la cifra di prima. Il prompt deve
 // essere quel messaggio: dopo una compattazione resta anche lì un messaggio solo, il riassunto. Un turno senza testo (notifica
-// di un agente, ripartenza) non svuota nulla
+// di un agente, ripartenza) non svuota nulla, e nemmeno una sessione che non ha mai avuto una cifra: lì ctx è già n/d e i messaggi
+// non si leggono
 const markEmptied = async ($: EngineInterface, prompt: string) => {
   const text = prompt.trim()
   if (!text) {
@@ -522,8 +524,13 @@ const markEmptied = async ($: EngineInterface, prompt: string) => {
   if (!usage || usage.context.percent !== undefined) {
     return
   }
-  const messages = await $.session.messages().catch(() => null)
-  const sessionId = await $.session.id().catch(() => null)
+  if ((await read($, snapshot))?.context === undefined && !(await read($, contextEstimate))) {
+    return
+  }
+  const [messages, sessionId] = await Promise.all([
+    $.session.messages().catch(() => null),
+    $.session.id().catch(() => null),
+  ])
   if (!messages || sessionId === null) {
     return
   }
@@ -558,6 +565,10 @@ const contextFor = async (
   const known = isEmptied ? undefined : estimate ? (estimate.percent ?? undefined) : measured?.context
   if (!usage || sessionId === null || (measured?.context === undefined && !estimate)) {
     return known
+  }
+  // durante un turno, con n/d già deciso (conversazione svuotata o stima non riuscita), i messaggi non cambierebbero nulla
+  if (!canEstimate && known === undefined) {
+    return undefined
   }
   const messages = await $.session.messages().catch(() => null)
   if (!messages) {
