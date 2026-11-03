@@ -7,6 +7,14 @@
     {
       "name": "usage-band",
       "source": "./"
+    },
+    {
+      "name": "toast-notify",
+      "source": {
+        "source": "github",
+        "repo": "mavidasnc/toast-notify"
+      },
+      "description": "Notifiche toast di Windows per Claude Code"
     }
   ],
   "description": "Mod di Claude Code sviluppati da Mavida"
