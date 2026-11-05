@@ -673,10 +673,14 @@ test('il clic sul contesto scrive nel prompt vuoto la richiesta di valutare /com
     toasts.push(e.text)
     return { value: undefined }
   })
+  mock.store(on)
+  on('ui.notify', () => ({ value: { isSent: false, reason: 'no-channel' } }))
 
   await $.session.start(START)
   await $.session.measure(MEASURE)
   const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  // La misura oltre soglia ha già avvisato: contano solo gli avvisi del clic
+  toasts.length = 0
   // Il segmento resta uguale a prima: etichetta, barra e percentuale
   expect(await ui.find({ text: /ctx .* 92%/ })).toBeDefined()
 
@@ -1229,4 +1233,119 @@ test('senza orario di reset il ritmo non compare', async ($, on) => {
 
   expect(await ui.find({ text: /5h .* 95%$/ })).toBeDefined()
   expect(await ui.find({ text: /[▲▼→]/ })).toBeUndefined()
+})
+
+// Motore per i test delle notifiche: orologio fermo a PACE_NOW, store in memoria (con i valori iniziali indicati),
+// toast e notifiche di sistema registrati; `measure` invia una misura con contesto e limiti
+const stubNotifications = async (
+  $: Parameters<TestBody>[0],
+  on: Parameters<TestBody>[1],
+  stored: Record<string, unknown> = {},
+) => {
+  const clock = mock.clock(on, { now: PACE_NOW })
+  mock.env(on, {})
+  mock.store(on, stored)
+  stubEngine(on)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('session.id', () => ({ value: 's1' }))
+  const toasts: string[] = []
+  const notices: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    // tutti i toast delle notifiche restano 10 secondi
+    expect(e.timeoutMs).toBe(10_000)
+    return { value: undefined }
+  })
+  on('ui.notify', (_$, e) => {
+    notices.push(e.text)
+    return { value: { isSent: true, channel: 'terminal_bell' } }
+  })
+  await $.session.start(START)
+  const measure = (context: number | undefined, rateLimits: unknown[]) =>
+    $.session.measure({ context: { window: 200000, percent: context }, rateLimits, changed: ['context', 'rateLimits'] } as never)
+  return { clock, toasts, notices, measure }
+}
+
+// Reset del 5h fra 2h30 da PACE_NOW
+const FIVE_RESET = new Date(PACE_NOW + 2.5 * 3_600_000).toISOString()
+
+test('5h e 7g avvisano una volta al passaggio in giallo e in rosso, il rosso anche con la notifica di sistema', async ($, on) => {
+  const { toasts, notices, measure } = await stubNotifications($, on)
+
+  await measure(10, [{ kind: 'five_hour', percentUsed: 72, resetsAt: FIVE_RESET }])
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0]).toMatch(/^🟡 Limite 5h al 72%, reset (\p{L}{3} )?\d{2}:\d{2}$/u)
+  expect(notices).toEqual([])
+
+  // Sempre giallo nella stessa finestra: nessun nuovo avviso
+  await measure(10, [{ kind: 'five_hour', percentUsed: 78, resetsAt: FIVE_RESET }])
+  expect(toasts).toHaveLength(1)
+
+  // Rosso: toast e notifica di sistema
+  await measure(10, [{ kind: 'five_hour', percentUsed: 91, resetsAt: FIVE_RESET }])
+  expect(toasts).toHaveLength(2)
+  expect(notices).toHaveLength(1)
+  expect(notices[0]).toMatch(/^Limite 5h al 91%/)
+
+  // Il settimanale ha il suo conteggio; senza orario di reset il testo non lo riporta
+  await measure(10, [{ kind: 'seven_day', percentUsed: 70 }])
+  expect(toasts[1]).toMatch(/^🔴 Limite 5h al 91%/)
+  expect(toasts[2]).toBe('🟡 Limite 7g al 70%')
+})
+
+test('una finestra già notificata in una sessione precedente non avvisa di nuovo', async ($, on) => {
+  const { toasts, measure } = await stubNotifications($, on, {
+    'notified:fiveHour': { resetsAt: FIVE_RESET, level: 1 },
+  })
+
+  await measure(10, [{ kind: 'five_hour', percentUsed: 75, resetsAt: FIVE_RESET }])
+  expect(toasts).toEqual([])
+})
+
+test('il contesto avvisa a ogni salita di livello, anche di nuovo dopo una compattazione', async ($, on) => {
+  const { toasts, notices, measure } = await stubNotifications($, on)
+
+  await measure(75, [])
+  expect(toasts).toEqual(['🟡 Contesto al 75%: valuta /compact'])
+  await measure(80, [])
+  expect(toasts).toHaveLength(1)
+
+  // Dopo una compattazione scende; risalendo fino al rosso avvisa di nuovo, anche con la notifica di sistema
+  await measure(30, [])
+  await measure(92, [])
+  expect(toasts).toEqual(['🟡 Contesto al 75%: valuta /compact', '🔴 Contesto al 92%: valuta /compact'])
+  expect(notices).toEqual(['Contesto al 92%: valuta /compact'])
+})
+
+test("all'azzeramento del 5h arriva un avviso se la finestra era almeno gialla, una volta sola", async ($, on) => {
+  const { clock, toasts, notices, measure } = await stubNotifications($, on)
+  const reset = new Date(PACE_NOW + 3_600_000).toISOString()
+
+  await measure(10, [{ kind: 'five_hour', percentUsed: 85, resetsAt: reset }])
+  expect(toasts).toHaveLength(1)
+
+  await clock.advance(3_600_000 + 5_000)
+  expect(toasts[1]).toBe('🟢 Limite 5h azzerato')
+  expect(notices).toEqual(['Limite 5h azzerato'])
+
+  // La prima misura della finestra nuova non lo ripete
+  await measure(10, [{ kind: 'five_hour', percentUsed: 2, resetsAt: new Date(PACE_NOW + 6 * 3_600_000).toISOString() }])
+  expect(toasts).toHaveLength(2)
+})
+
+test("una misura della finestra nuova prima del timer annuncia comunque l'azzeramento; una finestra verde non lo annuncia", async ($, on) => {
+  const { clock, toasts, measure } = await stubNotifications($, on)
+  const reset = new Date(PACE_NOW + 3_600_000).toISOString()
+
+  await measure(10, [{ kind: 'five_hour', percentUsed: 85, resetsAt: reset }])
+  // Il reset è passato, il timer (5 secondi dopo) non ancora: arriva la misura della finestra nuova
+  await clock.advance(3_600_000 + 1_000)
+  await measure(10, [{ kind: 'five_hour', percentUsed: 1, resetsAt: new Date(PACE_NOW + 6 * 3_600_000).toISOString() }])
+  expect(toasts).toEqual([expect.stringMatching(/^🟡 Limite 5h al 85%/), '🟢 Limite 5h azzerato'])
+  await clock.advance(10_000)
+  expect(toasts).toHaveLength(2)
+
+  // La finestra nuova resta verde: al suo reset nessun avviso
+  await clock.advance(6 * 3_600_000)
+  expect(toasts).toHaveLength(2)
 })

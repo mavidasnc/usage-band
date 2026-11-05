@@ -10,6 +10,7 @@ import type {
 } from 'claude-code'
 
 import type { Limit, Operation, Snapshot } from '../types'
+import { checkThresholds } from './notify'
 import { pace, trendSymbol, WINDOW_MS, type Pace } from './pace'
 
 // Ultima misura dell'uso, letta dal disegno della barra
@@ -620,6 +621,8 @@ const fill = async ($: EngineInterface) => {
       fiveHour: measured.fiveHour ?? lastLimits.fiveHour,
       sevenDay: measured.sevenDay ?? lastLimits.sevenDay,
     }))
+    // Una sessione aperta con un limite già oltre soglia avvisa subito, se la finestra non è già stata notificata
+    await checkThresholds($, measured)
   } catch {
     // misura non disponibile: la barra usa i ripieghi finché non arriva session.measure
   }
@@ -691,6 +694,8 @@ export const register: Register = on => {
       emptiedSession = null
       await update($, contextEstimate, () => null)
     }
+    // Notifiche al passaggio in giallo e in rosso, e timer dell'azzeramento del 5h
+    await checkThresholds($, measured)
 
     return next(e)
   })

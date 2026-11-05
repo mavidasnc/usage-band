@@ -2,6 +2,13 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.19.0] - 2026-11-05
+
+### Aggiunto
+- Notifiche di soglia: quando 5h, 7g o ctx passano in giallo (70%) o in rosso (90%) compare per 10 secondi un toast nel terminale, con un simbolo colorato in testa (`🟡 Limite 5h al 72%, reset 14:20`, `🔴 Contesto al 92%: valuta /compact`); per il rosso arriva anche la notifica di sistema, visibile da un'altra finestra.
+- Per 5h e 7g ogni livello si notifica una volta per finestra di limite, anche con più sessioni aperte e dopo un riavvio (il mod ricorda l'ultimo livello notificato). Il contesto avvisa di nuovo se torna a salire dopo una compattazione.
+- Allo scadere della finestra di 5 ore, se era almeno gialla, toast `🟢 Limite 5h azzerato` e notifica di sistema, una volta sola.
+
 ## [0.18.0] - 2026-11-05
 
 ### Aggiunto

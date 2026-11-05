@@ -42,6 +42,12 @@ L'immagine è un'illustrazione con valori di esempio.
 - **versione**: versione del mod (`vX.Y.Z`), in verde acqua.
 
 I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90%.
+
+**Notifiche.** Quando 5h, 7g o ctx passano in giallo o in rosso compare per 10 secondi un toast nel terminale, con un
+simbolo colorato in testa (`🟡 Limite 5h al 72%, reset 14:20`, `🔴 Contesto al 92%: valuta /compact`); per il rosso arriva anche la notifica di sistema
+(se il terminale la supporta e le notifiche di Claude Code sono attive). Per 5h e 7g ogni livello si notifica una volta per
+finestra, anche tra sessioni; il contesto avvisa di nuovo se risale dopo una compattazione. Quando la finestra di 5 ore
+si azzera, se era almeno gialla, arriva `🟢 Limite 5h azzerato`.
 Una voce senza dato mostra `n/d`.
 Se il terminale è abbastanza largo tutto sta su una riga, altrimenti i consumi restano
 sulla prima riga e token, cartella, modello, email e versione vanno sulla seconda.
