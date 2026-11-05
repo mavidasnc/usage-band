@@ -10,6 +10,7 @@ import type {
 } from 'claude-code'
 
 import type { Limit, Operation, Snapshot } from '../types'
+import { GIT_DEBOUNCE_MS, GIT_TOOLS, gitFor, gitLabel, scheduleGit } from './git'
 import { checkThresholds } from './notify'
 import { pace, trendSymbol, WINDOW_MS, type Pace } from './pace'
 
@@ -676,6 +677,7 @@ export const register: Register = on => {
     await fill($)
     envCacheTtl = await readEnvCacheTtl($)
     await scheduleCacheTick($)
+    scheduleGit($)
 
     return result
   })
@@ -706,6 +708,8 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     if (USER_ORIGINS.includes(e.origin.kind) && !e.isMeta) {
       isUserPromptPending = true
+      // Tra un prompt e l'altro la persona può aver cambiato i file o il branch da fuori
+      scheduleGit($)
     }
 
     return next(e)
@@ -768,6 +772,35 @@ export const register: Register = on => {
     return result
   })
 
+  // Uno strumento che può cambiare il working tree (anche di un subagente): rilegge lo stato git poco dopo, una volta sola
+  // per più strumenti di fila. Il risultato dello strumento passa intatto
+  on('tool.call', async ($, e, next) => {
+    const result = await next(e)
+    if (GIT_TOOLS.includes(e.tool)) {
+      try {
+        scheduleGit($, GIT_DEBOUNCE_MS)
+      } catch {
+        // orologio non disponibile: lo stato git si aggiorna al prossimo prompt
+      }
+    }
+
+    return result
+  })
+
+  // Fine di un turno del loop principale: lo stato git definitivo dopo le modifiche del turno
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined) {
+      try {
+        scheduleGit($)
+      } catch {
+        // orologio non disponibile: lo stato git si aggiorna al prossimo prompt
+      }
+    }
+
+    return result
+  })
+
   // /usage-band: alterna barra visibile e nascosta
   on('command.run', { command: 'usage-band' }, async $ => {
     const hidden = !(await read($, isHidden))
@@ -824,7 +857,14 @@ export const register: Register = on => {
       fiveHour: measured?.fiveHour ?? live?.fiveHour ?? lastLimits.fiveHour,
       sevenDay: measured?.sevenDay ?? live?.sevenDay ?? lastLimits.sevenDay,
     }
-    const folder = folderLabel(await $.session.cwd())
+    const cwd = await $.session.cwd()
+    const folder = folderLabel(cwd)
+    // Stato git della cartella: mai letto qui (il disegno non lancia processi); se manca, o la cartella è cambiata, lo legge un timer
+    const git = gitFor(cwd)
+    if (git === undefined) {
+      scheduleGit($)
+    }
+    const gitText = git ? gitLabel(git) : null
     // Durante un turno vale il modello della richiesta in corso (può cambiare durante il turno, ad esempio con opusplan), altrimenti quello della sessione
     const current = (e.props.isWorking ? await read($, stepModel) : null) ?? (await $.session.model())
     const model = modelLabel(current)
@@ -949,7 +989,8 @@ export const register: Register = on => {
       )
     }
 
-    // Riga dell'ambiente: token, costo della sessione, cartella (gialla), modello (arancio), effort (viola), email (azzurra) e versione
+    // Riga dell'ambiente: token, costo della sessione, cartella (gialla), stato git (branch in viola, righe aggiunte e tolte in verde
+    // e rosso), modello (arancio), effort (viola), email (azzurra) e versione
     // del mod (verde acqua); token, costo, effort, email e versione compaiono quando sono noti. Modello ed effort sono pulsanti che
     // eseguono /model e /effort, quindi stanno fuori dai Text
     const envRow = (
@@ -961,6 +1002,23 @@ export const register: Register = on => {
           {sessionItem ? <Text dimColor> │ </Text> : null}
           <Text color="warning">{folder}</Text>
           <Text dimColor> │ </Text>
+          {git ? (
+            <Text>
+              <Text color="merged">
+                {git.branch}
+                {git.isDirty ? '*' : ''}
+              </Text>
+              {git.ahead || git.behind ? (
+                <Text dimColor>
+                  {git.ahead ? ` ↑${git.ahead}` : ''}
+                  {git.behind ? ` ↓${git.behind}` : ''}
+                </Text>
+              ) : null}
+              {git.added ? <Text color="success"> +{git.added}</Text> : null}
+              {git.removed ? <Text color="error"> −{git.removed}</Text> : null}
+            </Text>
+          ) : null}
+          {git ? <Text dimColor> │ </Text> : null}
         </Text>
         <Button key="model" label={model} plain onPress={() => runCommand('model')}>
           <Text color="claude">{model}</Text>
@@ -1008,7 +1066,7 @@ export const register: Register = on => {
     // Compatta la riga dell'ambiente sparisce e restano consumi e pulsante (" │ [▸]")
     const envLength = compact
       ? 0
-      : [tokens && `tkn ${operationText(tokens, detailed)}`, sessionText, folder, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
+      : [tokens && `tkn ${operationText(tokens, detailed)}`, sessionText, folder, gitText, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
           .filter(Boolean)
           .join(' │ ').length + 3
     // La riga dei consumi si allunga delle indicazioni del ritmo di 5h e 7g

@@ -195,8 +195,10 @@ test('dopo /clear la barra ritrova consumi, email e versione', async ($, on) => 
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => {
-    authCalls++
+  on('process.run', (_$, e) => {
+    if (e.argv[0] === 'claude') {
+      authCalls++
+    }
     return ran(JSON.stringify({ loggedIn: true, email: 'maurizio@mavida.com' }))
   })
   on('command.register', () => ({ value: { command: 'usage-band' } }))
@@ -1420,4 +1422,102 @@ test('una notifica di sistema rifiutata da un plugin non passa dalla notifica na
   await measure(92, [])
   await clock.settle()
   expect(powershell).toEqual([])
+})
+
+// Motore per i test di git: `repo.status` e `repo.diff` sono le uscite di `git status --porcelain=v2 --branch` e di
+// `git diff HEAD --shortstat` (null: comando fallito, come fuori da un repository); `repo.reads` conta le letture di status
+const stubGit = (on: Parameters<TestBody>[1]) => {
+  const repo: { status: string | null; diff: string | null; reads: number } = { status: null, diff: '', reads: 0 }
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('tool.call', () => ({ result: 'ok' }) as never)
+  on('process.run', (_$, e) => {
+    if (e.argv[0] === 'git' && e.argv[1] === 'status') {
+      repo.reads++
+      return repo.status === null ? ran('', 128) : ran(repo.status)
+    }
+    if (e.argv[0] === 'git' && e.argv[1] === 'diff') {
+      return repo.diff === null ? ran('', 128) : ran(repo.diff)
+    }
+    return ran('', 1)
+  })
+  return { repo, clock }
+}
+
+// Uscita di git status: branch main collegato a origin/main, un commit avanti e due indietro, un file modificato
+const STATUS_MAIN = [
+  '# branch.oid 1234567890abcdef1234567890abcdef12345678',
+  '# branch.head main',
+  '# branch.upstream origin/main',
+  '# branch.ab +1 -2',
+  '1 .M N... 100644 100644 100644 aaaaaaa bbbbbbb hooks/register.tsx',
+].join('\n')
+
+test('la riga ambiente mostra branch, modifiche, avanti/indietro e righe cambiate', async ($, on) => {
+  const { repo, clock } = stubGit(on)
+  repo.status = STATUS_MAIN
+  repo.diff = ' 3 files changed, 120 insertions(+), 34 deletions(-)\n'
+
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  expect(await ui.find({ text: /mio-progetto │ main\* ↑1 ↓2 \+120 −34 │ Opus/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^main\*$/ }))?.props.color).toBe('merged')
+  expect((await ui.find({ type: 'Text', text: /^ \+120$/ }))?.props.color).toBe('success')
+  expect((await ui.find({ type: 'Text', text: /^ −34$/ }))?.props.color).toBe('error')
+})
+
+test('con HEAD staccato compare il commit breve; senza modifiche né remoto solo il branch', async ($, on) => {
+  const { repo, clock } = stubGit(on)
+  repo.status = '# branch.oid 1234567890abcdef1234567890abcdef12345678\n# branch.head (detached)\n'
+
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  expect(await ui.find({ text: /mio-progetto │ 1234567 │ Opus/ })).toBeDefined()
+})
+
+test('fuori da un repository la voce git non compare', async ($, on) => {
+  const { repo, clock } = stubGit(on)
+  repo.status = null
+
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+  expect(await ui.find({ text: /mio-progetto │ Opus/ })).toBeDefined()
+})
+
+test('dopo uno strumento che può cambiare i file lo stato git si rilegge, una volta sola per più strumenti di fila', async ($, on) => {
+  const { repo, clock } = stubGit(on)
+  repo.status = '# branch.oid 1234567890abcdef1234567890abcdef12345678\n# branch.head main\n'
+
+  await $.session.start(START)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await ui.find({ text: /│ main │/ })).toBeDefined()
+  const readsBefore = repo.reads
+
+  // Due modifiche di fila: una sola lettura, due secondi dopo l'ultima
+  repo.status += '? nuovo.txt\n'
+  await $.tool.call({ tool: 'Edit', file_path: 'a.txt', old_string: 'a', new_string: 'b' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'touch nuovo.txt' } as never)
+  await clock.advance(1_000)
+  expect(repo.reads).toBe(readsBefore)
+  await clock.advance(1_000)
+  expect(repo.reads).toBe(readsBefore + 1)
+  expect(await ui.find({ text: /│ main\* │/ })).toBeDefined()
+
+  // Uno strumento che non scrive non rilegge
+  await $.tool.call({ tool: 'Read', file_path: 'a.txt' } as never)
+  await clock.advance(3_000)
+  expect(repo.reads).toBe(readsBefore + 1)
 })

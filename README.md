@@ -30,6 +30,10 @@ L'immagine è un'illustrazione con valori di esempio.
   sessione come lo conta Claude Code (lo stesso di `/cost`): dopo `--continue` o `--resume` comprende anche il lavoro precedente,
   `/clear` lo azzera. Non è cliccabile e compare dalla prima richiesta.
 - **cartella**: cartella di lavoro con la sua cartella padre, in giallo.
+- **git**: subito dopo la cartella, il branch (o il commit breve se HEAD è staccato) in viola, con `*` se ci sono modifiche
+  non salvate o file non tracciati; `↑1 ↓2` per i commit avanti e indietro rispetto al branch remoto collegato (senza fetch);
+  righe aggiunte (verde) e tolte (rosso) rispetto all'ultimo commit: `main* ↑1 ↓2 +120 −34`. Le parti a zero non compaiono,
+  fuori da un repository non compare la voce. Si aggiorna all'avvio, a ogni prompt, a fine turno e poco dopo ogni modifica ai file.
 - **modello**: il nome leggibile del modello in uso (`Opus 5.5`, non `claude-opus-5-5`), in arancio;
   durante un turno mostra il modello della richiesta in corso (con `opusplan` in plan mode, ad esempio, `Opus 5.5`).
   Un clic esegue `/model`, che apre la schermata di scelta del modello, senza toccare ciò che si sta scrivendo nel prompt.
@@ -51,7 +55,7 @@ finestra, anche tra sessioni; il contesto avvisa di nuovo se risale dopo una com
 si azzera, se era almeno gialla, arriva `🟢 Limite 5h azzerato`.
 Una voce senza dato mostra `n/d`.
 Se il terminale è abbastanza largo tutto sta su una riga, altrimenti i consumi restano
-sulla prima riga e token, cartella, modello, email e versione vanno sulla seconda.
+sulla prima riga e token, cartella, git, modello, email e versione vanno sulla seconda.
 Subito dopo la cache, separato da una pipe, un pulsante (`[◂]`, cliccabile) nasconde token, cartella, modello, effort, email e versione
 lasciando solo i consumi; `[▸]` li rimostra. La scelta vale per la sessione e resta dopo `/clear`.
 La barra è sempre visibile e cede il posto solo ai sondaggi di Claude Code.

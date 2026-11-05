@@ -2,6 +2,12 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.20.0] - 2026-11-05
+
+### Aggiunto
+- Stato git nella riga ambiente, dopo la cartella: branch (o commit breve se HEAD è staccato) in viola con `*` se ci sono modifiche non salvate o file non tracciati, `↑`/`↓` per i commit avanti e indietro rispetto al branch remoto collegato (dati locali, senza fetch), righe aggiunte in verde e tolte in rosso rispetto a HEAD: `main* ↑1 ↓2 +120 −34`. Fuori da un repository la voce non compare.
+- Lo stato si rilegge in background all'avvio, a ogni prompt, a fine turno e due secondi dopo uno strumento che può cambiare i file (Bash, PowerShell, Edit, Write, NotebookEdit, anche dei subagenti), una volta sola per più strumenti di fila; la barra non lancia mai `git` mentre si disegna.
+
 ## [0.19.1] - 2026-11-05
 
 ### Corretto
