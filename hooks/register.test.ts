@@ -1715,3 +1715,94 @@ test("con l'interruttore spento il costo di ripresa non compare e non avvisa", {
   expect(await ui.find({ text: /ripresa/ })).toBeUndefined()
   expect(toasts).toEqual([])
 })
+
+// Motore per i test della riga di attività: strumenti che rispondono subito (TaskCreate con un id progressivo), tranne quelli
+// il cui nome è in `gates`, che attendono che il test risolva la promessa; turni che iniziano e finiscono a richiesta
+const stubActivity = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1]) => {
+  const gates = new Map<string, Promise<void>>()
+  let created = 0
+  mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  stubEngine(on)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('tool.call', async (_$, e) => {
+    await gates.get(e.tool)
+    return (e.tool === 'TaskCreate' ? { result: { task: { id: `k${++created}`, subject: 'x' } } } : { result: 'ok' }) as never
+  })
+  await $.session.start(START)
+  const call = (tool: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, ...input } as never)
+  const complete = (turnId: string, agentId?: string) =>
+    $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, agentId, reason: 'answer' } as never)
+  const mount = (props = WORKING) => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props })
+  return { gates, call, complete, mount }
+}
+
+test('durante un turno la terza riga mostra strumento in corso, subagenti, strumenti usati e lista di attività', async ($, on) => {
+  const { gates, call, complete, mount } = await stubActivity($, on)
+  await prompt($, 'fai qualcosa', 't1')
+
+  await call('Read', { file_path: 'a' })
+  await call('Read', { file_path: 'b' })
+  await call('Edit', { file_path: 'a', old_string: 'x', new_string: 'y' })
+  await call('TodoWrite', {
+    todos: [
+      { content: 'uno', status: 'completed', activeForm: 'uno' },
+      { content: 'due', status: 'in_progress', activeForm: 'due' },
+      { content: 'tre', status: 'pending', activeForm: 'tre' },
+    ],
+  })
+  // Un comando ancora in corso e un subagente al lavoro
+  let release = () => {}
+  gates.set('Bash', new Promise<void>(resolve => (release = resolve)))
+  const bash = call('Bash', { command: 'npm test' })
+  await $.turn.start({ text: 'cerca', turnId: 's1', agentId: 'a1' } as never)
+
+  const ui = await mount()
+  expect(await ui.find({ text: '⟳ Bash · ∴ 1 · ✓ Read ×2 Edit TodoWrite · ☐ 1/3' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text', text: /^⟳ Bash$/ })).map(node => node.props.color)).toContain('warning')
+  expect((await ui.findAll({ type: 'Text', text: /^∴ 1$/ })).map(node => node.props.color)).toContain('autoAccept')
+
+  // Il comando finisce e il subagente pure: restano riepilogo e lista
+  release()
+  await bash
+  await complete('s1', 'a1')
+  expect(await (await mount()).find({ text: '✓ Read ×2 Edit TodoWrite Bash · ☐ 1/3' })).toBeDefined()
+
+  // A turno finito la riga sparisce
+  expect(await (await mount(PROPS)).find({ text: /✓/ })).toBeUndefined()
+
+  // Un prompt nuovo azzera il riepilogo; la lista di attività resta
+  await prompt($, 'continua', 't2')
+  expect(await (await mount()).find({ text: /^☐ 1\/3$/ })).toBeDefined()
+  expect(await (await mount()).find({ text: /✓/ })).toBeUndefined()
+})
+
+test('la lista di attività segue anche TaskCreate e TaskUpdate', async ($, on) => {
+  const { call, mount } = await stubActivity($, on)
+  await prompt($, 'pianifica', 't1')
+
+  await call('TaskCreate', { subject: 'uno', description: 'uno' })
+  await call('TaskCreate', { subject: 'due', description: 'due' })
+  await call('TaskCreate', { subject: 'tre', description: 'tre' })
+  await call('TaskUpdate', { taskId: 'k1', status: 'completed' })
+  await call('TaskUpdate', { taskId: 'k3', status: 'deleted' })
+
+  expect(await (await mount()).find({ text: /☐ 1\/2$/ })).toBeDefined()
+})
+
+test('nel preset essential la riga di attività non compare', { options: { preset: 'essential' } }, async ($, on) => {
+  const { call, mount } = await stubActivity($, on)
+  await prompt($, 'fai', 't1')
+  await call('Read', { file_path: 'a' })
+
+  expect(await (await mount()).find({ text: /✓/ })).toBeUndefined()
+})
+
+test("con l'interruttore dell'attività spento la riga non compare", { options: { showActivity: false } }, async ($, on) => {
+  const { call, mount } = await stubActivity($, on)
+  await prompt($, 'fai', 't1')
+  await call('Read', { file_path: 'a' })
+
+  expect(await (await mount()).find({ text: /✓/ })).toBeUndefined()
+})

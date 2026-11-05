@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Barra sopra il prompt con % limite 5h, % limite settimanale e % contesto, colorate per soglia.",
   "author": { "name": "Maurizio Pelizzone" },
   "types": "./types/index.d.ts",
@@ -58,6 +58,12 @@
       "description": "Quando la cache entra nel rosso, avvisa se una ripresa costerebbe almeno questa cifra. 0 spegne l'avviso.",
       "default": 0.5,
       "min": 0
+    },
+    "showActivity": {
+      "type": "boolean",
+      "title": "usage-band: attività durante il turno",
+      "description": "Terza riga durante un turno: strumento in corso, subagenti al lavoro, strumenti usati e avanzamento della lista di attività.",
+      "default": true
     }
   }
 }

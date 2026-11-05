@@ -10,6 +10,18 @@ import type {
 } from 'claude-code'
 
 import type { Limit, Operation, Snapshot } from '../types'
+import {
+  activityParts,
+  agentFinished,
+  agentStarted,
+  resetActivity,
+  startActivity,
+  taskCreated,
+  taskUpdated,
+  todoListWritten,
+  toolFinished,
+  toolStarted,
+} from './activity'
 import { GIT_DEBOUNCE_MS, GIT_TOOLS, gitFor, gitLabel, scheduleGit } from './git'
 import { checkThresholds, sendAlert } from './notify'
 import { applyOptions, levelFor, settings, visibleItems } from './options'
@@ -771,6 +783,8 @@ export const register: Register = (on, options) => {
       const costStart = await sessionCost($)
       lastOperation = { id: e.turnId, input: 0, output: 0, cacheRead: 0, agents: 0, costStart, cost: costStart === null ? null : 0 }
       await update($, operation, () => lastOperation)
+      // la riga di attività riparte con il prompt
+      startActivity()
     }
     // Il turno di un subagente appartiene all'operazione in corso quando parte: vale anche per un agente
     // risvegliato da un prompt successivo, e non dipende dall'ordine con cui agent.spawn risponde
@@ -779,6 +793,9 @@ export const register: Register = (on, options) => {
       if (current) {
         agentOperation.set(e.agentId, current.id)
       }
+      // un subagente al lavoro, per la riga di attività
+      agentStarted(e.agentId)
+      $.ui.invalidate('ui.render')
     }
 
     return next(e)
@@ -826,8 +843,31 @@ export const register: Register = (on, options) => {
 
   // Uno strumento che può cambiare il working tree (anche di un subagente): rilegge lo stato git poco dopo, una volta sola
   // per più strumenti di fila. Il risultato dello strumento passa intatto
+  // Lo stesso hook alimenta la riga di attività: strumento in corso durante la chiamata, riepilogo e lista di attività dopo
   on('tool.call', async ($, e, next) => {
-    const result = await next(e)
+    const isMain = e.agentId === undefined
+    const key = toolStarted(e.tool_use_id, e.tool, isMain)
+    $.ui.invalidate('ui.render')
+    let result
+    try {
+      result = await next(e)
+    } finally {
+      // conta per l'operazione corrente: il loop principale e i subagenti nati in essa (un agente mai visto vi appartiene)
+      const current = (await read($, operation).catch(() => null))?.id
+      const owner = isMain ? current : (agentOperation.get(e.agentId ?? '') ?? current)
+      toolFinished(key, e.tool, owner !== undefined && owner === current)
+      $.ui.invalidate('ui.render')
+    }
+    if (e.tool === 'TodoWrite' && Array.isArray(e.todos)) {
+      todoListWritten(e.todos)
+    } else if (e.tool === 'TaskCreate') {
+      const id = (result as { result?: { task?: { id?: unknown } } }).result?.task?.id
+      if (typeof id === 'string') {
+        taskCreated(id)
+      }
+    } else if (e.tool === 'TaskUpdate') {
+      taskUpdated(e.taskId, e.status)
+    }
     if (GIT_TOOLS.includes(e.tool)) {
       try {
         scheduleGit($, GIT_DEBOUNCE_MS)
@@ -842,6 +882,11 @@ export const register: Register = (on, options) => {
   // Fine di un turno del loop principale: lo stato git definitivo dopo le modifiche del turno
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    // il subagente ha finito il suo turno: esce dalla riga di attività
+    if (e.agentId !== undefined) {
+      agentFinished(e.agentId)
+      $.ui.invalidate('ui.render')
+    }
     if (e.agentId === undefined) {
       try {
         scheduleGit($)
@@ -892,6 +937,8 @@ export const register: Register = (on, options) => {
       tickedSessionId = sessionId
       void scheduleCacheTick($)
       if (isSessionChange) {
+        // la riga di attività della sessione di prima non vale più (variabili del modulo: si possono scrivere dal disegno)
+        resetActivity()
         $.clock.after(0, () => {
           void fill($).catch(() => undefined)
         })
@@ -1173,6 +1220,25 @@ export const register: Register = (on, options) => {
     // Separatore dalla chat: una riga vuota e una linea tenue larga quanto la band
     const separator = <Text dimColor>{'─'.repeat(Math.max(e.props.bodyColumns ?? 0, 1))}</Text>
 
+    // Terza riga, solo durante un turno: strumenti in corso (gialli), subagenti (viola), riepilogo degli strumenti e lista di attività
+    // (tenui). Sparisce a turno finito e con i dettagli nascosti dal pulsante
+    const parts = visible.activity && e.props.isWorking && !compact ? activityParts() : []
+    const PART_COLORS = { running: 'warning', agents: 'autoAccept' } as const
+    const activityRow = parts.length ? (
+      <Text>
+        {parts.map((part, i) => (
+          <Text key={part.kind}>
+            {i ? <Text dimColor> · </Text> : null}
+            {part.kind === 'running' || part.kind === 'agents' ? (
+              <Text color={PART_COLORS[part.kind]}>{part.text}</Text>
+            ) : (
+              <Text dimColor>{part.text}</Text>
+            )}
+          </Text>
+        ))}
+      </Text>
+    ) : null
+
     // Preset Minimal: solo la riga dei consumi, senza pulsante né riga dell'ambiente
     if (!visible.envRow) {
       return (
@@ -1200,6 +1266,7 @@ export const register: Register = (on, options) => {
             {envRow}
           </Box>
         )}
+        {activityRow}
       </Box>
     )
   })

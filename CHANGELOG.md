@@ -2,6 +2,12 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.23.0] - 2026-11-05
+
+### Aggiunto
+- Riga di attività sotto la barra, solo durante un turno: `⟳ Bash · ∴ 2 · ✓ Read ×3 Edit ×2 · ☐ 3/7`. In ordine: gli strumenti in corso nel loop principale (gialli), i subagenti al lavoro (viola), gli strumenti usati dal prompt corrente e dai suoi subagenti (i cinque più usati) e l'avanzamento della lista di attività del modello, da TodoWrite o da TaskCreate/TaskUpdate. A turno finito la riga sparisce; il riepilogo riparte a ogni prompt, la lista di attività resta per la sessione.
+- In `/config` l'interruttore **attività durante il turno**. La riga c'è solo nel preset `full` e si nasconde con il pulsante `[◂]`.
+
 ## [0.22.0] - 2026-11-05
 
 ### Aggiunto

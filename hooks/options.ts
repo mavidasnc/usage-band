@@ -18,6 +18,7 @@ export type Settings = {
   showGit: boolean
   showResumeCost: boolean
   resumeAlertUsd: number
+  showActivity: boolean
 }
 
 // Valori predefiniti, gli stessi di plugin.json
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showGit: true,
   showResumeCost: true,
   resumeAlertUsd: 0.5,
+  showActivity: true,
 }
 
 const PRESETS: readonly Preset[] = ['full', 'essential', 'minimal']
@@ -62,6 +64,7 @@ export const readSettings = (options: PluginOptions): Settings => {
       typeof options.resumeAlertUsd === 'number' && Number.isFinite(options.resumeAlertUsd)
         ? Math.max(options.resumeAlertUsd, 0)
         : DEFAULT_SETTINGS.resumeAlertUsd,
+    showActivity: flag(options.showActivity),
   }
 }
 
@@ -94,6 +97,7 @@ export type Visible = {
   email: boolean
   version: boolean
   resumeCost: boolean
+  activity: boolean
 }
 
 export const visibleItems = (s: Settings = current): Visible => {
@@ -113,5 +117,6 @@ export const visibleItems = (s: Settings = current): Visible => {
     email: isFull,
     version: isFull,
     resumeCost: hasEnv && s.showResumeCost,
+    activity: isFull && s.showActivity,
   }
 }

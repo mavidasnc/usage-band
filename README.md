@@ -50,6 +50,11 @@ L'immagine è un'illustrazione con valori di esempio.
   (serve `claude` nel `PATH`; altrimenti viene dal file di configurazione di Claude Code, `.claude.json`).
 - **versione**: versione del mod (`vX.Y.Z`), in verde acqua.
 
+**Attività.** Durante un turno, sotto la barra, una terza riga mostra cosa sta succedendo:
+`⟳ Bash · ∴ 2 · ✓ Read ×3 Edit ×2 · ☐ 3/7`. Sono, in ordine, gli strumenti in corso (in giallo), i subagenti al lavoro (in viola),
+gli strumenti già usati dal prompt e dai suoi subagenti (i cinque più usati) e l'avanzamento della lista di attività del modello.
+A turno finito la riga sparisce; c'è solo nel preset `full` e si nasconde con `[◂]`.
+
 I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90% (soglie impostabili in `/config`).
 
 **Notifiche.** Quando 5h, 7g o ctx passano in giallo o in rosso compare per 10 secondi un toast nel terminale, con un
@@ -74,7 +79,7 @@ In `/config`, alle righe che iniziano con «usage-band:» (una modifica vale sub
   branch git con `*`, modello ed effort; `minimal` solo la riga dei consumi, senza ritmo né pulsante `[◂]`.
 - **soglia gialla** e **soglia rossa** (70 e 90): colori di 5h, 7g e ctx e notifiche. La gialla deve essere minore della rossa,
   altrimenti valgono 70 e 90.
-- **ritmo di consumo**, **notifiche di soglia**, **stato git**, **costo di ripresa**: interruttori che spengono la funzione anche
+- **ritmo di consumo**, **notifiche di soglia**, **stato git**, **costo di ripresa**, **attività durante il turno**: interruttori che spengono la funzione anche
   nel preset completo.
 - **avviso costo di ripresa ($)**: la cifra oltre la quale, con la cache nel rosso, arriva l'avviso (0.50; 0 lo spegne).
 
