@@ -29,6 +29,7 @@ import { applyOptions, levelFor, settings, visibleItems } from './options'
 import { pace, trendSymbol, WINDOW_MS, type Pace } from './pace'
 import { durationLabel, pulseDuration, pulseEnd, pulseStart, pushPoint, rateLabel, sparkline } from './pulse'
 import { CACHE_WRITE_RATIO, loadPrices, markStep, priceFor, resumeCost, settleStep } from './resume'
+import { announceUpdate, isUpdating, startUpdate } from './update'
 
 // Ultima misura dell'uso, letta dal disegno della barra
 const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
@@ -737,6 +738,8 @@ export const register: Register = (on, options) => {
     })
     const result = await next(e)
     await fill($)
+    // Dopo un aggiornamento dal click sulla versione il mod riparte da qui: annuncia la versione nuova
+    await announceUpdate($, lastVersion).catch(() => undefined)
     envCacheTtl = await readEnvCacheTtl($)
     await loadPrices($, await $.session.model().catch(() => null))
     await scheduleCacheTick($)
@@ -1206,9 +1209,12 @@ export const register: Register = (on, options) => {
     ) : null
     const gitShownText = gitShown ? (visible.gitDetail ? gitText : `${gitShown.branch}${gitShown.isDirty ? '*' : ''}`) : null
 
+    // Versione del mod, con ⟳ mentre il click sulla voce sta aggiornando il mod
+    const versionText = modVersion ? `v${modVersion}${isUpdating() ? ' ⟳' : ''}` : null
+
     // Riga dell'ambiente: token, costo della sessione, cartella (gialla), stato git, modello (arancio), effort (viola), email (azzurra)
     // e versione del mod (verde acqua), ognuna se il preset la prevede e ha un dato. Modello ed effort sono pulsanti che eseguono
-    // /model e /effort, quindi stanno fuori dai Text
+    // /model e /effort, la versione aggiorna il mod: stanno fuori dai Text
     const envRow = (
       <Box>
         {present.tokens ? tokenItem : null}
@@ -1236,8 +1242,12 @@ export const register: Register = (on, options) => {
           {sep('email')}
           {present.email ? <Text color="suggestion">{account}</Text> : null}
           {sep('version')}
-          {present.version ? <Text color="planMode">v{modVersion}</Text> : null}
         </Text>
+        {present.version ? (
+          <Button key="version" label={versionText ?? ''} plain onPress={() => void startUpdate($)}>
+            <Text color="planMode">{versionText}</Text>
+          </Button>
+        ) : null}
       </Box>
     )
 
@@ -1275,7 +1285,7 @@ export const register: Register = (on, options) => {
       model,
       effort: level === null ? null : String(level),
       email: account,
-      version: modVersion && `v${modVersion}`,
+      version: versionText,
     }
     const envLength = compact
       ? 0

@@ -1981,3 +1981,153 @@ test("con l'interruttore spento durata e sparkline non compaiono", { options: { 
 
   expect(await (await mount()).find({ text: /^tkn 4\.0k · \$0\.40$/ })).toBeDefined()
 })
+
+// Motore sotto il click sulla versione: CLI di Claude Code finta (elenco dei plugin, aggiornamento del marketplace e del
+// plugin), comandi eseguiti, toast mostrati e cartella del mod presa dalla lettura del suo plugin.json.
+// `installed` è la versione installata, `latest` quella che porta l'aggiornamento; `inline` simula --plugin-dir;
+// `failure` fa fallire l'aggiornamento del plugin; `gate` tiene fermo l'aggiornamento del marketplace finché non si apre
+type UpdateStub = { installed: string; latest: string; running: string; inline?: boolean; failure?: string; gate?: Promise<void> }
+async function stubUpdate($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], stub: UpdateStub) {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  let root = ''
+  const calls: string[] = []
+  const commands: string[] = []
+  const toasts: string[] = []
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('fs.read', (_$, e) => {
+    root = e.path.replace(/[\\/]\.claude-plugin[\\/]plugin\.json$/, '')
+    return { value: JSON.stringify({ name: 'usage-band', version: stub.running }) }
+  })
+  on('process.run', async (_$, e) => {
+    const args = e.argv.slice(1).join(' ')
+    if (e.argv[0] !== 'claude' || args === 'auth status') {
+      return ran('', 1)
+    }
+    calls.push(args)
+    if (args === 'plugin list --json') {
+      // La cartella installata con le barre rovesciate, maiuscole e la barra finale: il confronto le ignora
+      // Dopo l'aggiornamento la cartella installata è quella della versione nuova, diversa da quella del mod che gira
+      const path = stub.inline
+        ? 'C:\\altrove\\usage-band'
+        : stub.installed === stub.running
+          ? `${root.replace(/\//g, '\\').toUpperCase()}\\`
+          : `C:\\cache\\mavida-mods\\usage-band\\${stub.installed}`
+      return ran(
+        JSON.stringify([
+          { id: 'altro@mavida-mods', version: '1.0.0', installPath: root },
+          { id: 'usage-band@mavida-mods', version: stub.installed, installPath: path },
+        ]),
+      )
+    }
+    if (args === 'plugin marketplace update mavida-mods') {
+      await stub.gate
+      return ran('')
+    }
+    if (args === 'plugin update usage-band@mavida-mods') {
+      if (stub.failure) {
+        return { value: { exitCode: 1, stdout: '', stderr: `\n${stub.failure}\n`, isStdoutTruncated: false, isStderrTruncated: false } }
+      }
+      stub.installed = stub.latest
+      return ran('')
+    }
+    return ran('', 1)
+  })
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('command.run', (_$, e) => {
+    commands.push(e.command)
+    return {}
+  })
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  await $.session.start(START)
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  return { clock, calls, commands, toasts, mount }
+}
+
+test("il click sulla versione dice che l'ultima è già installata", async ($, on) => {
+  const { clock, calls, commands, toasts, mount } = await stubUpdate($, on, { installed: '1.2.0', latest: '1.2.0', running: '1.2.0' })
+
+  await (await mount()).press({ key: 'version' })
+  await clock.settle()
+  expect(calls).toEqual([
+    'plugin list --json',
+    'plugin marketplace update mavida-mods',
+    'plugin update usage-band@mavida-mods',
+    'plugin list --json',
+  ])
+  expect(commands).toEqual([])
+  expect(toasts).toEqual(["usage-band è già all'ultima versione (v1.2.0)"])
+})
+
+test('il click sulla versione aggiorna il mod, ricarica i plugin e annuncia la versione nuova', async ($, on) => {
+  let open = () => {}
+  const gate = new Promise<void>(resolve => {
+    open = resolve
+  })
+  const stub: UpdateStub = { installed: '1.2.0', latest: '1.3.0', running: '1.2.0', gate }
+  const { clock, calls, commands, toasts, mount } = await stubUpdate($, on, stub)
+
+  // Durante l'aggiornamento la versione mostra ⟳ e un secondo click non fa nulla
+  const ui = await mount()
+  await ui.press({ key: 'version' })
+  expect(await (await mount()).find({ text: 'v1.2.0 ⟳' })).toBeDefined()
+  await (await mount()).press({ key: 'version' })
+  open()
+  await clock.settle()
+  expect(calls.filter(call => call === 'plugin marketplace update mavida-mods')).toHaveLength(1)
+  expect(commands).toEqual(['reload-plugins'])
+  expect(toasts).toEqual([])
+  expect(await (await mount()).find({ text: 'v1.2.0' })).toBeDefined()
+
+  // Il reload fa ripartire il mod con la versione nuova: un toast la annuncia, una volta sola
+  stub.running = '1.3.0'
+  await $.session.start(START)
+  expect(toasts).toEqual(['usage-band aggiornato alla v1.3.0'])
+  await $.session.start(START)
+  expect(toasts).toEqual(['usage-band aggiornato alla v1.3.0'])
+})
+
+test('se il reload non carica la versione nuova chiede di riavviare', async ($, on) => {
+  const { clock, toasts, mount } = await stubUpdate($, on, { installed: '1.2.0', latest: '1.3.0', running: '1.2.0' })
+
+  await (await mount()).press({ key: 'version' })
+  await clock.settle()
+  await $.session.start(START)
+  expect(toasts).toEqual(['usage-band v1.3.0 installato: riavvia Claude Code per usarlo'])
+})
+
+test('con --plugin-dir il click sulla versione non aggiorna nulla', async ($, on) => {
+  const { clock, calls, commands, toasts, mount } = await stubUpdate($, on, {
+    installed: '1.2.0',
+    latest: '1.3.0',
+    running: '1.2.0',
+    inline: true,
+  })
+
+  await (await mount()).press({ key: 'version' })
+  await clock.settle()
+  expect(calls).toEqual(['plugin list --json'])
+  expect(commands).toEqual([])
+  expect(toasts).toEqual(['usage-band è caricato da una cartella (--plugin-dir): nessun aggiornamento'])
+})
+
+test("un aggiornamento fallito lo dice con il motivo e la versione resta cliccabile", async ($, on) => {
+  const { clock, commands, toasts, mount } = await stubUpdate($, on, {
+    installed: '1.2.0',
+    latest: '1.3.0',
+    running: '1.2.0',
+    failure: 'Network error: getaddrinfo ENOTFOUND github.com',
+  })
+
+  await (await mount()).press({ key: 'version' })
+  await clock.settle()
+  expect(commands).toEqual([])
+  expect(toasts).toEqual(['Aggiornamento di usage-band non riuscito: Network error: getaddrinfo ENOTFOUND github.com'])
+  expect(await (await mount()).find({ text: 'v1.2.0' })).toBeDefined()
+})

@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.0] - 2026-11-05
+
+### Aggiunto
+- Un clic sulla versione del mod aggiorna `usage-band`: aggiorna il marketplace e il plugin con la CLI di Claude Code, con `⟳` accanto alla versione durante il controllo. Se arriva una versione nuova esegue `/reload-plugins` e un toast annuncia `usage-band aggiornato alla vX.Y.Z` (o chiede di riavviare se il reload non l'ha caricata); altrimenti un toast dice che l'ultima versione è già installata. Con `--plugin-dir` e in caso di errore un toast lo spiega.
+
 ## [1.1.0] - 2026-11-05
 
 ### Aggiunto

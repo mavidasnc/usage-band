@@ -60,7 +60,7 @@ I limiti 5h e settimanale esistono solo con un abbonamento Claude (Pro, Max, Tea
   dell'effort; finito il comando, la barra mostra il livello in vigore.
 - **email**: l'account corrente, in azzurro, ricavata all'avvio con `claude auth status`
   (serve `claude` nel `PATH`; altrimenti viene dal file di configurazione di Claude Code, `.claude.json`).
-- **versione**: versione del mod (`vX.Y.Z`), in verde acqua.
+- **versione**: versione del mod (`vX.Y.Z`), in verde acqua. Un clic aggiorna il mod (vedi [Aggiornamento](#aggiornamento)).
 
 ## Riga dell'attività
 
@@ -122,7 +122,12 @@ Confermare con `y` l'aggiunta del marketplace e scegliere lo scope `user` per av
 
 ## Aggiornamento
 
-Da `/plugin`, sezione dei marketplace, aggiornare `mavida-mods` e poi il plugin `usage-band`.
+Un clic sulla versione (`v1.2.0`) aggiorna il marketplace `mavida-mods` e il plugin; durante il controllo accanto alla versione
+compare `⟳`. Se arriva una versione nuova la barra esegue `/reload-plugins` e un toast lo conferma (`usage-band aggiornato alla
+v1.3.0`), altrimenti un toast dice che l'ultima versione è già installata. Con il mod caricato da `--plugin-dir` il clic non
+aggiorna nulla; un errore (rete, CLI `claude` non nel PATH) arriva come toast con il motivo.
+
+A mano: da `/plugin`, sezione dei marketplace, aggiornare `mavida-mods` e poi il plugin `usage-band`.
 
 ## Sviluppo
 

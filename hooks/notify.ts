@@ -9,7 +9,7 @@ import { levelFor, settings } from './options'
 // I livelli (giallo e rosso) seguono le soglie dei colori della barra, impostabili in /config
 
 // Durata dei toast, in millisecondi (il motore di suo li tiene 4 secondi)
-const TOAST_MS = 10_000
+export const TOAST_MS = 10_000
 
 // Tipo di avviso: giallo, rosso o azzeramento del 5h, con il simbolo colorato in testa al toast (il toast non ha colori suoi)
 type Alert = 'warn' | 'error' | 'reset'
