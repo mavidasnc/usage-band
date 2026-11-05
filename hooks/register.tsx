@@ -11,9 +11,10 @@ import type {
 
 import type { Limit, Operation, Snapshot } from '../types'
 import { GIT_DEBOUNCE_MS, GIT_TOOLS, gitFor, gitLabel, scheduleGit } from './git'
-import { checkThresholds } from './notify'
-import { applyOptions, levelFor, visibleItems } from './options'
+import { checkThresholds, sendAlert } from './notify'
+import { applyOptions, levelFor, settings, visibleItems } from './options'
 import { pace, trendSymbol, WINDOW_MS, type Pace } from './pace'
+import { CACHE_WRITE_RATIO, loadPrices, markStep, priceFor, resumeCost, settleStep } from './resume'
 
 // Ultima misura dell'uso, letta dal disegno della barra
 const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
@@ -407,6 +408,39 @@ const readEnvCacheTtl = async ($: EngineInterface): Promise<typeof envCacheTtl> 
   return null
 }
 
+// Rapporto del prezzo di scrittura in cache per la durata in uso (5 minuti o un'ora)
+const writeRatio = () => CACHE_WRITE_RATIO[envCacheTtl === '5m' ? '5m' : '1h']
+
+// Scadenza della cache (al secondo) per cui l'avviso del costo di ripresa è già stato valutato: uno solo per richiesta
+let resumeAlertedFor: number | null = null
+
+// Testo del costo di una ripresa con il contesto e il modello indicati; null se manca il prezzo o il contesto
+const resumeLabel = (contextTokens: number | undefined, model: string | null) => {
+  const price = priceFor(model)
+  return contextTokens && price !== null ? `ripresa ≈ ${costLabel(resumeCost(contextTokens, price, writeRatio()))}` : null
+}
+
+// Cache appena entrata nel rosso: se una ripresa costerebbe almeno la soglia di /config, toast e notifica di sistema.
+// Una valutazione per scadenza: i tick successivi della stessa cache non rileggono il contesto
+const checkResumeAlert = async ($: EngineInterface, remainingMs: number) => {
+  const { resumeAlertUsd, showResumeCost } = settings()
+  const expiry = Math.round(((await $.clock.now()) + remainingMs) / 1000)
+  if (!showResumeCost || resumeAlertUsd <= 0 || resumeAlertedFor === expiry) {
+    return
+  }
+  resumeAlertedFor = expiry
+  const usage = await $.session.usage().catch(() => null)
+  const price = priceFor(await $.session.model().catch(() => null))
+  const tokens = usage?.context.tokens
+  if (!tokens || price === null) {
+    return
+  }
+  const cost = resumeCost(tokens, price, writeRatio())
+  if (cost >= resumeAlertUsd) {
+    await sendAlert($, `Cache in scadenza fra ${cacheLabel(remainingMs)}: una ripresa costerebbe circa ${costLabel(cost)}`)
+  }
+}
+
 // Ridisegna la barra se l'etichetta della cache è cambiata e si risveglia quando cambierà di nuovo:
 // al prossimo minuto sopra i 10 minuti, al prossimo secondo sotto; fermo con n/d, scaduta o cache disattivata.
 // Va richiamata a ogni richiesta
@@ -420,6 +454,10 @@ const scheduleCacheTick = async ($: EngineInterface) => {
     if (label !== lastCacheLabel) {
       lastCacheLabel = label
       $.ui.invalidate('ui.render')
+    }
+    // Nel rosso (sotto il 10% della durata) e non ancora scaduta: avviso del costo di una ripresa, se alto
+    if (state && remainingMs !== null && remainingMs > 0 && remainingMs < state.ttlMs * 0.1) {
+      void checkResumeAlert($, remainingMs).catch(() => undefined)
     }
     if (remainingMs !== null && remainingMs > 0) {
       const unit = remainingMs > CACHE_SECONDS_FROM_MS ? 60_000 : 1000
@@ -680,6 +718,7 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     await fill($)
     envCacheTtl = await readEnvCacheTtl($)
+    await loadPrices($, await $.session.model().catch(() => null))
     await scheduleCacheTick($)
     scheduleGit($)
 
@@ -770,7 +809,16 @@ export const register: Register = (on, options) => {
       }
     }
 
-    const result = yield* next(e)
+    // Taratura del prezzo per il costo di ripresa: costo della sessione prima e dopo la richiesta, se resta l'unica in corso
+    const mark = await markStep($, e.agentId === undefined)
+    let result
+    try {
+      result = yield* next(e)
+    } catch (error) {
+      await settleStep($, mark, e.model, null, writeRatio())
+      throw error
+    }
+    await settleStep($, mark, e.model, e.agentId === undefined ? result.usage : null, writeRatio())
     await addUsage($, e.agentId, result.usage)
 
     return result
@@ -912,6 +960,11 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // Costo di una ripresa, accanto al countdown quando la cache è gialla, rossa o scaduta e il prezzo del modello è noto
+    const cacheTone = cache && cache.remainingMs !== null ? cacheColor(cache.remainingMs, cache.ttlMs) : null
+    const resumeText =
+      visible.resumeCost && cacheTone !== null && cacheTone !== 'success' ? resumeLabel(usage?.context.tokens, current) : null
+
     // Tempo residuo della cache del prompt: n/d prima della prima richiesta, scaduta (in rosso) a zero; assente con la cache disattivata
     const cacheSegment =
       cache === null ? null : cache.remainingMs === null ? (
@@ -920,6 +973,7 @@ export const register: Register = (on, options) => {
         <Text>
           <Text dimColor>cache </Text>
           <Text color={cacheColor(cache.remainingMs, cache.ttlMs)}>{cacheLabel(cache.remainingMs)}</Text>
+          {resumeText ? <Text dimColor> · {resumeText}</Text> : null}
         </Text>
       )
 
@@ -1112,7 +1166,9 @@ export const register: Register = (on, options) => {
     const paceLength = [fivePace, sevenPace]
       .map(p => paceParts(p))
       .reduce((sum, { trend, exhaust }) => sum + trend.length + exhaust.length, 0)
-    const isWide = compact || USAGE_ROW_WIDTH + paceLength + 6 + envLength <= (e.viewport?.columns ?? 0)
+    // e del costo di una ripresa accanto alla cache
+    const resumeLength = resumeText ? ` · ${resumeText}`.length : 0
+    const isWide = compact || USAGE_ROW_WIDTH + paceLength + resumeLength + 6 + envLength <= (e.viewport?.columns ?? 0)
 
     // Separatore dalla chat: una riga vuota e una linea tenue larga quanto la band
     const separator = <Text dimColor>{'─'.repeat(Math.max(e.props.bodyColumns ?? 0, 1))}</Text>

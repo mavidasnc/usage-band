@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "Barra sopra il prompt con % limite 5h, % limite settimanale e % contesto, colorate per soglia.",
   "author": { "name": "Maurizio Pelizzone" },
   "types": "./types/index.d.ts",
@@ -45,6 +45,19 @@
       "title": "usage-band: stato git",
       "description": "Branch, modifiche, avanti/indietro e righe cambiate nella riga ambiente.",
       "default": true
+    },
+    "showResumeCost": {
+      "type": "boolean",
+      "title": "usage-band: costo di ripresa",
+      "description": "Accanto alla cache gialla, rossa o scaduta, quanto costerebbe riprendere a cache scaduta; anche l'avviso qui sotto.",
+      "default": true
+    },
+    "resumeAlertUsd": {
+      "type": "number",
+      "title": "usage-band: avviso costo di ripresa ($)",
+      "description": "Quando la cache entra nel rosso, avvisa se una ripresa costerebbe almeno questa cifra. 0 spegne l'avviso.",
+      "default": 0.5,
+      "min": 0
     }
   }
 }

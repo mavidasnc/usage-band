@@ -103,6 +103,11 @@ async function send($: EngineInterface, text: string, alert: Alert) {
   }
 }
 
+// Avviso esterno alle soglie (il costo di una ripresa): stesso canale delle notifiche, al livello rosso
+export async function sendAlert($: EngineInterface, text: string) {
+  await send($, text, 'error')
+}
+
 // Notifica un limite se è salito di livello rispetto all'ultimo notificato per la stessa finestra
 async function checkLimit($: EngineInterface, kind: keyof typeof STORE_KEY, limit: Limit | undefined) {
   if (!limit) {

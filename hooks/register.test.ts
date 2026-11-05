@@ -1608,3 +1608,110 @@ test(
     expect(toasts).toEqual([])
   },
 )
+
+// Motore per i test del costo di ripresa: orologio, store (con i valori iniziali indicati) e cache di un'ora; il costo della
+// sessione cresce di `engine.stepCost` a ogni richiesta, che riporta 1000 token d'ingresso nuovi; il contesto è di `engine.tokens`.
+// Una richiesta il cui turnId è in `engine.gates` attende che il test risolva la sua promessa
+const stubResume = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], stored: Record<string, unknown> = {}) => {
+  const engine = { cost: 0, stepCost: 0.005, tokens: 100_000, gates: new Map<string, Promise<void>>() }
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  mock.store(on, stored)
+  on('session.start', () => ({ cwd: '' }))
+  on('session.cwd', () => ({ value: 'C:\Users\maurizio\Claude\mio-progetto' }))
+  on('session.model', () => ({ value: 'opus' }))
+  on('session.id', () => ({ value: 's1' }))
+  on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+  on('process.run', () => ran('', 1))
+  on('command.register', () => ({ value: { command: 'usage-band' } }))
+  on('session.usage', () => ({
+    value: { startedAt: 0, context: { window: 200000, tokens: engine.tokens, percent: 10 }, rateLimits: [], cost: { usd: engine.cost } },
+  }))
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.notify', () => ({ value: { isSent: true, channel: 'kitty' } }))
+  on('turn.step', async function* (_$, e) {
+    await engine.gates.get(e.turnId)
+    engine.cost += engine.stepCost
+    const usage = { input_tokens: 1000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], usage } as never
+  })
+  await $.session.start(START)
+  const step = async (turnId = 't', agentId?: string) => {
+    for await (const _chunk of $.turn.step({ turnId, index: 0, model: 'opus', messageCount: 1, agentId } as never)) {
+      // nessun chunk atteso
+    }
+  }
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  return { engine, clock, toasts, step, ui }
+}
+
+test('con la cache gialla compare il costo di una ripresa, tarato dal costo delle risposte', { timeoutMs: 30000 }, async ($, on) => {
+  const { clock, step, ui } = await stubResume($, on)
+
+  // 1000 token d'ingresso per $0.005: prezzo base $5 per milione; 100k token di contesto riscritti a 2× = $1.00
+  await step()
+  expect(await ui.find({ text: /cache 60m$/ })).toBeDefined()
+
+  // Gialla (sotto il 25% di un'ora): il costo compare accanto al countdown
+  await clock.advance(46 * 60_000)
+  expect(await ui.find({ text: /cache 14m · ripresa ≈ \$1\.00/ })).toBeDefined()
+})
+
+test("nel rosso arriva un avviso se la ripresa costa almeno la soglia, una volta sola", { timeoutMs: 30000 }, async ($, on) => {
+  const { clock, step, toasts } = await stubResume($, on)
+
+  await step()
+  await clock.advance(54 * 60_000 + 1_000)
+  expect(toasts).toEqual([expect.stringMatching(/^🔴 Cache in scadenza fra 5:\d\d: una ripresa costerebbe circa \$1\.00$/)])
+
+  await clock.advance(30_000)
+  expect(toasts).toHaveLength(1)
+})
+
+test('sotto la soglia di /config nessun avviso', { options: { resumeAlertUsd: 2 }, timeoutMs: 30000 }, async ($, on) => {
+  const { clock, step, toasts } = await stubResume($, on)
+
+  await step()
+  await clock.advance(55 * 60_000)
+  expect(toasts).toEqual([])
+})
+
+test('il prezzo tarato in una sessione precedente vale subito', { timeoutMs: 30000 }, async ($, on) => {
+  const { engine, clock, step, ui } = await stubResume($, on, { 'price:last': 'opus', 'price:opus': 0.000005 })
+
+  // Una richiesta senza costo non tara: vale il prezzo salvato
+  engine.stepCost = 0
+  await step()
+  await clock.advance(46 * 60_000)
+  expect(await ui.find({ text: /ripresa ≈ \$1\.00/ })).toBeDefined()
+})
+
+test('una richiesta con un subagente in parallelo non tara il prezzo', { timeoutMs: 30000 }, async ($, on) => {
+  const { engine, clock, step, ui } = await stubResume($, on)
+
+  // La richiesta principale resta in corso mentre un subagente fa la sua: il costo della sessione le somma entrambe
+  let release = () => {}
+  engine.gates.set('main', new Promise<void>(resolve => (release = resolve)))
+  const main = step('main')
+  await clock.settle()
+  await step('sub', 'a1')
+  release()
+  await main
+
+  await clock.advance(46 * 60_000)
+  expect(await ui.find({ text: /cache 14m/ })).toBeDefined()
+  expect(await ui.find({ text: /ripresa/ })).toBeUndefined()
+})
+
+test("con l'interruttore spento il costo di ripresa non compare e non avvisa", { options: { showResumeCost: false }, timeoutMs: 30000 }, async ($, on) => {
+  const { clock, step, toasts, ui } = await stubResume($, on)
+
+  await step()
+  await clock.advance(55 * 60_000)
+  expect(await ui.find({ text: /ripresa/ })).toBeUndefined()
+  expect(toasts).toEqual([])
+})

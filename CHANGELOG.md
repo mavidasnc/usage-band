@@ -2,6 +2,13 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.22.0] - 2026-11-05
+
+### Aggiunto
+- Costo di una ripresa a cache scaduta: quando la cache è gialla, rossa o scaduta, accanto al countdown compare quanto costerebbe la prossima richiesta dovendo riscrivere in cache tutto il contesto (`cache 9:58 · ripresa ≈ $1.80`). Il prezzo di ogni modello si ricava dalle risposte: aumento del costo della sessione diviso i token, pesati con i rapporti di listino (scrittura in cache 1,25× a 5 minuti e 2× a un'ora, lettura 0,1×, uscita 5×). Tara solo una richiesta rimasta sola dall'inizio alla fine e resta salvato per le sessioni successive.
+- Quando la cache entra nel rosso, se una ripresa costerebbe almeno $0.50, toast `🔴 Cache in scadenza fra 5:59: una ripresa costerebbe circa $1.80` e notifica di sistema, una volta per richiesta.
+- In `/config`: interruttore **costo di ripresa** (voce e avviso) e **avviso costo di ripresa ($)**, la soglia dell'avviso (0 lo spegne). Nel preset `minimal` la voce non compare.
+
 ## [0.21.0] - 2026-11-05
 
 ### Aggiunto

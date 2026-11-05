@@ -19,6 +19,11 @@ L'immagine è un'illustrazione con valori di esempio.
   in minuti (`cache 42m`) sopra i 10 minuti, poi in minuti e secondi (`cache 9:58`), `cache scaduta` a zero.
   Verde, giallo sotto il 25% della durata, rosso sotto il 10% e quando è scaduta. La durata (5 minuti o 1 ora) viene da `FORCE_PROMPT_CACHING_5M` / `ENABLE_PROMPT_CACHING_1H`,
   altrimenti vale un'ora.
+  Quando la cache è gialla, rossa o scaduta, accanto compare il costo stimato di una ripresa (`cache 9:58 · ripresa ≈ $1.80`):
+  quanto costerebbe la prossima richiesta dovendo riscrivere in cache tutto il contesto. Il prezzo del modello si ricava dalle
+  risposte precedenti (aumento del costo della sessione e rapporti di listino tra le voci di prezzo), quindi compare dopo la prima
+  risposta del modello e resta noto nelle sessioni successive. Quando la cache entra nel rosso, se la ripresa costerebbe almeno
+  $0.50 (soglia in `/config`), arriva un avviso.
   Dopo `/resume` (o `claude --resume`) ctx e cache compaiono subito: la cache è contata dall'ultima risposta della conversazione ripresa,
   letta dal suo transcript.
 - **tkn**: consumo dell'ultimo prompt, con tutte le richieste in cui si spezza e i subagenti che lancia.
@@ -69,7 +74,9 @@ In `/config`, alle righe che iniziano con «usage-band:» (una modifica vale sub
   branch git con `*`, modello ed effort; `minimal` solo la riga dei consumi, senza ritmo né pulsante `[◂]`.
 - **soglia gialla** e **soglia rossa** (70 e 90): colori di 5h, 7g e ctx e notifiche. La gialla deve essere minore della rossa,
   altrimenti valgono 70 e 90.
-- **ritmo di consumo**, **notifiche di soglia**, **stato git**: interruttori che spengono la funzione anche nel preset completo.
+- **ritmo di consumo**, **notifiche di soglia**, **stato git**, **costo di ripresa**: interruttori che spengono la funzione anche
+  nel preset completo.
+- **avviso costo di ripresa ($)**: la cifra oltre la quale, con la cache nel rosso, arriva l'avviso (0.50; 0 lo spegne).
 
 ## Comandi
 
