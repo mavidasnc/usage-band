@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.24.0",
+  "version": "1.0.0",
   "description": "Barra sopra il prompt con % limite 5h, % limite settimanale e % contesto, colorate per soglia.",
   "author": { "name": "Maurizio Pelizzone" },
   "types": "./types/index.d.ts",
@@ -78,6 +78,12 @@
       "default": 95,
       "min": 1,
       "max": 100
+    },
+    "showPulse": {
+      "type": "boolean",
+      "title": "usage-band: durata e andamento dei prompt",
+      "description": "Accanto ai token: durata del prompt, token al minuto e sparkline del costo degli ultimi prompt.",
+      "default": true
     }
   }
 }

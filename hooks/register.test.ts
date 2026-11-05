@@ -1869,3 +1869,90 @@ test('la guardia è spenta di default: anche al 99% i subagenti partono', { opti
   expect((await spawn()).agentId).toBe('a1')
   expect(await (await mount()).find({ text: /⛨/ })).toBeUndefined()
 })
+
+// Motore per i test di durata e sparkline: orologio, token per richiesta e costo della sessione a scelta, turni che finiscono a
+// richiesta; `run` esegue un prompt con una richiesta che porta i token indicati e, se dato, il costo della sessione a fine prompt
+const stubPulse = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], withCost = true) => {
+  const usages: Record<string, unknown> = {}
+  const cost: { usd?: number } = withCost ? { usd: 0 } : {}
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  mock.store(on)
+  stubEngine(on, usages, cost)
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  await $.session.start(START)
+  const step = async (turnId: string) => {
+    for await (const _chunk of $.turn.step({ turnId, index: 0, model: 'opus', messageCount: 1 } as never)) {
+      // nessun chunk atteso
+    }
+  }
+  const complete = (turnId: string) =>
+    $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' } as never)
+  const run = async (turnId: string, input: number, sessionUsd?: number) => {
+    await prompt($, 'fai', turnId)
+    usages[`${turnId}/0`] = usage(input, 0, 0)
+    if (sessionUsd !== undefined && withCost) {
+      cost.usd = sessionUsd
+    }
+    await step(turnId)
+    await complete(turnId)
+  }
+  const mount = (props = PROPS) =>
+    $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props, viewport: { columns: 400, rows: 24 } })
+  return { clock, usages, cost, step, complete, run, mount }
+}
+
+test('accanto ai token compaiono la durata del prompt, dal vivo durante il turno, e i token al minuto', async ($, on) => {
+  const { clock, usages, step, complete, mount } = await stubPulse($, on)
+
+  await prompt($, 'fai qualcosa', 't1')
+  usages['t1/0'] = usage(10_000, 0, 0)
+  await step('t1')
+
+  // Durante il turno la durata scorre (nei primi 10 secondi senza velocità)
+  await clock.advance(5_000)
+  expect(await (await mount(WORKING)).find({ text: /^tkn 10\.0k · <\$0\.01 · 5s$/ })).toBeDefined()
+  await clock.advance(25_000)
+  expect(await (await mount(WORKING)).find({ text: /^tkn 10\.0k · <\$0\.01 · 30s · 20\.0k\/min$/ })).toBeDefined()
+
+  // A fine turno resta la durata finale, anche se il tempo passa
+  await clock.advance(72_000)
+  await complete('t1')
+  await clock.advance(60_000)
+  expect(await (await mount()).find({ text: /^tkn 10\.0k · <\$0\.01 · 1:42 · 5\.9k\/min$/ })).toBeDefined()
+})
+
+test('la sparkline segue il costo degli ultimi prompt; nel dettaglio anche quella dei token', async ($, on) => {
+  const { run, mount } = await stubPulse($, on)
+
+  // Tre prompt da $0.10, $0.40 e $0.50 (il costo della sessione sale a 0.10, 0.50, 1.00), con 1k, 4k e 8k token
+  await run('t1', 1_000, 0.1)
+  await run('t2', 4_000, 0.5)
+  await run('t3', 8_000, 1.0)
+
+  const ui = await mount()
+  expect(await ui.find({ text: /^tkn 8\.0k · \$0\.50 · 0s · ▂▇█$/ })).toBeDefined()
+
+  // Il clic sui token passa al dettaglio: entrambe le sparkline
+  await ui.press({ key: 'tokens' })
+  expect(await (await mount()).find({ text: /· \$▂▇█ #▂▅█$/ })).toBeDefined()
+})
+
+test('senza il costo della sessione la sparkline segue i token', async ($, on) => {
+  const { run, mount } = await stubPulse($, on, false)
+
+  await run('t1', 1_000)
+  await run('t2', 8_000)
+
+  expect(await (await mount()).find({ text: /^tkn 8\.0k · 0s · ▂█$/ })).toBeDefined()
+})
+
+test("con l'interruttore spento durata e sparkline non compaiono", { options: { showPulse: false } }, async ($, on) => {
+  const { run, mount } = await stubPulse($, on)
+
+  await run('t1', 1_000, 0.1)
+  await run('t2', 4_000, 0.5)
+
+  expect(await (await mount()).find({ text: /^tkn 4\.0k · \$0\.40$/ })).toBeDefined()
+})

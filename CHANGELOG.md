@@ -2,6 +2,15 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.0.0] - 2026-11-05
+
+### Aggiunto
+- Accanto ai token dell'ultimo prompt: la durata del prompt, che scorre dal vivo durante il turno e comprende i subagenti, i token nuovi al minuto (dopo 10 secondi) e una sparkline del costo degli ultimi 8 prompt della sessione: `tkn 28.7k · $0.54 · 1:42 · 17.0k/min ▂▅▇▃`. Senza il costo della sessione la sparkline segue i token; nel dettaglio (clic su `tkn`) compaiono entrambe, `$▂▅▇▃ #▁▃▆▂`. `/clear` azzera lo storico.
+- In `/config` l'interruttore **durata e andamento dei prompt**; nel preset `essential` queste voci non compaiono.
+
+### Modificato
+- README riorganizzato per righe della barra (consumi, ambiente, attività) con sezioni per disposizione, notifiche, guardia e opzioni; nuova illustrazione con i tre preset.
+
 ## [0.24.0] - 2026-11-05
 
 ### Aggiunto

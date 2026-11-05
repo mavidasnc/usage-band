@@ -9,7 +9,7 @@ import type {
   SessionUsage,
 } from 'claude-code'
 
-import type { Limit, Operation, Snapshot } from '../types'
+import type { Limit, Operation, PulsePoint, Snapshot } from '../types'
 import {
   activityParts,
   agentFinished,
@@ -27,6 +27,7 @@ import { GIT_DEBOUNCE_MS, GIT_TOOLS, gitFor, gitLabel, scheduleGit } from './git
 import { checkThresholds, sendAlert } from './notify'
 import { applyOptions, levelFor, settings, visibleItems } from './options'
 import { pace, trendSymbol, WINDOW_MS, type Pace } from './pace'
+import { durationLabel, pulseDuration, pulseEnd, pulseStart, pushPoint, rateLabel, sparkline } from './pulse'
 import { CACHE_WRITE_RATIO, loadPrices, markStep, priceFor, resumeCost, settleStep } from './resume'
 
 // Ultima misura dell'uso, letta dal disegno della barra
@@ -62,6 +63,12 @@ const operation = atom({ plugin: 'usage-band', key: 'operation' } as const, null
 
 // True quando i token mostrano il dettaglio (ingresso, uscita, letti dalla cache, agenti) invece del solo totale
 const isTokenDetailed = atom({ plugin: 'usage-band', key: 'isTokenDetailed' } as const, false)
+
+// Prompt conclusi della sessione (costo e token), per la sparkline accanto ai token; /clear lo azzera
+const history = atom({ plugin: 'usage-band', key: 'history' } as const, [] as PulsePoint[])
+
+// Timer che ridisegna la barra ogni secondo durante un turno, per la durata dal vivo
+let pulseTimer: { cancel: () => void } | null = null
 
 // Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset, cache), senza le indicazioni del ritmo
 const USAGE_ROW_WIDTH = 106
@@ -782,10 +789,26 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined && isUserPromptPending) {
       isUserPromptPending = false
       const costStart = await sessionCost($)
+      // il prompt precedente della sessione entra nello storico della sparkline
+      const previous = await read($, operation)
+      if (previous) {
+        await update($, history, list => pushPoint(list ?? [], { cost: previous.cost, tokens: operationTotal(previous) }))
+      }
       lastOperation = { id: e.turnId, input: 0, output: 0, cacheRead: 0, agents: 0, costStart, cost: costStart === null ? null : 0 }
       await update($, operation, () => lastOperation)
       // la riga di attività riparte con il prompt
       startActivity()
+      // durata dal vivo: inizio dell'operazione e un ridisegno al secondo fino alla fine del turno
+      const now = await $.clock.now().catch(() => null)
+      if (now !== null) {
+        pulseStart(e.turnId, now)
+        pulseTimer?.cancel()
+        try {
+          pulseTimer = $.clock.every(1000, () => $.ui.invalidate('ui.render'))
+        } catch {
+          pulseTimer = null
+        }
+      }
     }
     // Il turno di un subagente appartiene all'operazione in corso quando parte: vale anche per un agente
     // risvegliato da un prompt successivo, e non dipende dall'ordine con cui agent.spawn risponde
@@ -894,6 +917,19 @@ export const register: Register = (on, options) => {
   // Fine di un turno del loop principale: lo stato git definitivo dopo le modifiche del turno
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    // la durata dell'operazione arriva alla fine di questo turno, del loop principale o di un suo subagente; a fine turno
+    // principale si ferma il ridisegno al secondo
+    const current = (await read($, operation).catch(() => null))?.id
+    const owner = e.agentId === undefined ? current : (agentOperation.get(e.agentId) ?? current)
+    const now = await $.clock.now().catch(() => null)
+    if (now !== null) {
+      pulseEnd(owner, now)
+    }
+    if (e.agentId === undefined) {
+      pulseTimer?.cancel()
+      pulseTimer = null
+      $.ui.invalidate('ui.render')
+    }
     // il subagente ha finito il suo turno: esce dalla riga di attività
     if (e.agentId !== undefined) {
       agentFinished(e.agentId)
@@ -1083,12 +1119,34 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    // Durata del prompt (dal vivo durante il turno), token al minuto e sparkline degli ultimi prompt della sessione con quello corrente:
+    // nella vista compatta quella del costo (dei token se il costo non c'è), nel dettaglio entrambe
+    const pastPoints = tokens && visible.pulse ? ((await read($, history)) ?? []) : []
+    const pulseText = (() => {
+      if (!tokens || !visible.pulse) {
+        return ''
+      }
+      const elapsed = pulseDuration(tokens.id, now, e.props.isWorking)
+      const points = [...pastPoints, { cost: tokens.cost, tokens: operationTotal(tokens) }]
+      const costs = points.every(point => point.cost !== null) ? sparkline(points.map(point => point.cost ?? 0)) : null
+      const counts = sparkline(points.map(point => point.tokens))
+      const sparks = detailed
+        ? [costs && '$' + costs, counts && '#' + counts].filter(Boolean).join(' ')
+        : (costs ?? counts ?? '')
+      const rate = elapsed === null ? null : rateLabel(operationTotal(tokens), elapsed, tokenLabel)
+      return [elapsed === null ? null : durationLabel(elapsed), [rate, sparks].filter(Boolean).join(' ')]
+        .filter(Boolean)
+        .map(part => ` · ${part}`)
+        .join('')
+    })()
+    const tokenText = tokens ? `tkn ${operationText(tokens, detailed)}${pulseText}` : null
+
     // Token dell'ultima operazione, in testa alla riga dell'ambiente: l'intera voce ("tkn" e valori) è un pulsante che alterna
     // il totale e il dettaglio; la voce compare dopo il primo prompt
     const tokenItem = tokens ? (
       <Button
         key="tokens"
-        label={`tkn ${operationText(tokens, detailed)}`}
+        label={tokenText ?? ''}
         plain
         onPress={async () => {
           lastTokenDetailed = !detailed
@@ -1210,7 +1268,7 @@ export const register: Register = (on, options) => {
     // Tutto su una riga se c'è posto, altrimenti due righe: una riga troppo lunga andrebbe a capo e si perderebbe la coda.
     // Compatta la riga dell'ambiente sparisce e restano consumi e pulsante (" │ [▸]")
     const envTexts: Record<EnvItem, string | null> = {
-      tokens: tokens && `tkn ${operationText(tokens, detailed)}`,
+      tokens: tokenText,
       sessionCost: sessionText,
       folder,
       git: gitShownText,

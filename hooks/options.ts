@@ -21,6 +21,7 @@ export type Settings = {
   showActivity: boolean
   guard: boolean
   guardThreshold: number
+  showPulse: boolean
 }
 
 // Valori predefiniti, gli stessi di plugin.json
@@ -36,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showActivity: true,
   guard: false,
   guardThreshold: 95,
+  showPulse: true,
 }
 
 const PRESETS: readonly Preset[] = ['full', 'essential', 'minimal']
@@ -72,6 +74,7 @@ export const readSettings = (options: PluginOptions): Settings => {
     // la guardia è l'unico interruttore spento di default
     guard: options.guard === true,
     guardThreshold: threshold(options.guardThreshold) ?? DEFAULT_SETTINGS.guardThreshold,
+    showPulse: flag(options.showPulse),
   }
 }
 
@@ -105,6 +108,7 @@ export type Visible = {
   version: boolean
   resumeCost: boolean
   activity: boolean
+  pulse: boolean
 }
 
 export const visibleItems = (s: Settings = current): Visible => {
@@ -125,5 +129,6 @@ export const visibleItems = (s: Settings = current): Visible => {
     version: isFull,
     resumeCost: hasEnv && s.showResumeCost,
     activity: isFull && s.showActivity,
+    pulse: isFull && s.showPulse,
   }
 }

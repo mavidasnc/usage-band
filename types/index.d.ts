@@ -21,6 +21,9 @@ export type Operation = {
   cost: number | null
 }
 
+// Un prompt concluso nello storico della sessione, per la sparkline: costo in dollari (null dove il motore non lo conta) e token nuovi
+export type PulsePoint = { cost: number | null; tokens: number }
+
 declare module 'claude-code' {
   interface PluginState {
     'usage-band': {
@@ -35,6 +38,7 @@ declare module 'claude-code' {
       lastRequestAt: number | null
       operation: Operation | null
       isTokenDetailed: boolean
+      history: PulsePoint[]
     }
   }
 }
