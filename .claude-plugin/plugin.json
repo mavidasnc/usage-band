@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Barra sopra il prompt con % limite 5h, % limite settimanale e % contesto, colorate per soglia.",
   "author": { "name": "Maurizio Pelizzone" },
   "types": "./types/index.d.ts",
@@ -40,10 +40,22 @@
       "description": "Toast e notifiche di sistema quando 5h, 7g e ctx passano in giallo o in rosso, e all'azzeramento del 5h.",
       "default": true
     },
+    "showFolder": {
+      "type": "boolean",
+      "title": "usage-band: cartella",
+      "description": "Cartella di lavoro con la sua cartella padre nella riga ambiente (solo nel preset full).",
+      "default": true
+    },
     "showGit": {
       "type": "boolean",
       "title": "usage-band: stato git",
       "description": "Branch, modifiche, avanti/indietro e righe cambiate nella riga ambiente.",
+      "default": true
+    },
+    "showEmail": {
+      "type": "boolean",
+      "title": "usage-band: email",
+      "description": "Email dell'account corrente nella riga ambiente (solo nel preset full).",
       "default": true
     },
     "showResumeCost": {

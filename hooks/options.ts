@@ -15,7 +15,9 @@ export type Settings = {
   errorAt: number
   showPace: boolean
   notifications: boolean
+  showFolder: boolean
   showGit: boolean
+  showEmail: boolean
   showResumeCost: boolean
   resumeAlertUsd: number
   showActivity: boolean
@@ -31,7 +33,9 @@ export const DEFAULT_SETTINGS: Settings = {
   errorAt: 90,
   showPace: true,
   notifications: true,
+  showFolder: true,
   showGit: true,
+  showEmail: true,
   showResumeCost: true,
   resumeAlertUsd: 0.5,
   showActivity: true,
@@ -63,7 +67,9 @@ export const readSettings = (options: PluginOptions): Settings => {
     errorAt: isOrdered ? error : DEFAULT_SETTINGS.errorAt,
     showPace: flag(options.showPace),
     notifications: flag(options.notifications),
+    showFolder: flag(options.showFolder),
     showGit: flag(options.showGit),
+    showEmail: flag(options.showEmail),
     showResumeCost: flag(options.showResumeCost),
     // soglia dell'avviso in dollari, mai negativa; 0 lo spegne
     resumeAlertUsd:
@@ -120,12 +126,12 @@ export const visibleItems = (s: Settings = current): Visible => {
     toggle: hasEnv,
     tokens: hasEnv,
     sessionCost: hasEnv,
-    folder: isFull,
+    folder: isFull && s.showFolder,
     git: hasEnv && s.showGit,
     gitDetail: isFull && s.showGit,
     model: hasEnv,
     effort: hasEnv,
-    email: isFull,
+    email: isFull && s.showEmail,
     version: isFull,
     resumeCost: hasEnv && s.showResumeCost,
     activity: isFull && s.showActivity,

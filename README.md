@@ -100,7 +100,7 @@ In `/config`, alle righe che iniziano con «usage-band:» (una modifica vale sub
   branch git con `*`, modello ed effort; `minimal` solo la riga dei consumi, senza ritmo, costo di ripresa né pulsante `[◂]`.
 - **soglia gialla** e **soglia rossa** (70 e 90): colori di 5h, 7g e ctx e notifiche. La gialla deve essere minore della rossa,
   altrimenti valgono 70 e 90.
-- **ritmo di consumo**, **notifiche di soglia**, **stato git**, **costo di ripresa**, **attività durante il turno**,
+- **ritmo di consumo**, **notifiche di soglia**, **cartella**, **stato git**, **email**, **costo di ripresa**, **attività durante il turno**,
   **durata e andamento dei prompt**: interruttori che spengono la funzione anche nel preset completo.
 - **avviso costo di ripresa ($)**: la cifra oltre la quale, con la cache nel rosso, arriva l'avviso (0.50; 0 lo spegne).
 - **guardia sui limiti** (spenta) e **soglia della guardia (%)** (95): blocco dei subagenti vicino ai limiti.

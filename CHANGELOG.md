@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.1.0] - 2026-11-05
+
+### Aggiunto
+- In `/config` gli interruttori **cartella** ed **email**, accesi di default: tolgono la voce dalla riga ambiente anche nel preset `full`.
+
 ## [1.0.0] - 2026-11-05
 
 ### Aggiunto

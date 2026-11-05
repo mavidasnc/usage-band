@@ -1609,6 +1609,31 @@ test(
   },
 )
 
+test(
+  'gli interruttori di cartella ed email le tolgono anche nel preset completo',
+  { options: { showFolder: false, showEmail: false } },
+  async ($, on) => {
+    on('session.start', () => ({ cwd: '' }))
+    on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
+    on('session.model', () => ({ value: 'claude-opus-5-5' }))
+    on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
+    on('process.run', () => ran(JSON.stringify({ email: 'maurizio@mavida.com' })))
+    on('command.register', () => ({ value: { command: 'usage-band' } }))
+    on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+    on('session.measure', (_$, e) => ({ changed: e.changed }))
+
+    await $.session.start(START)
+    await $.session.measure(MEASURE)
+    const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+
+    // Modello e versione restano, cartella ed email no
+    expect(await ui.find({ text: 'Opus 5.5' })).toBeDefined()
+    expect(await ui.find({ text: 'v9.9.9' })).toBeDefined()
+    expect(await ui.find({ text: /mio-progetto/ })).toBeUndefined()
+    expect(await ui.find({ text: 'maurizio@mavida.com' })).toBeUndefined()
+  },
+)
+
 // Motore per i test del costo di ripresa: orologio, store (con i valori iniziali indicati) e cache di un'ora; il costo della
 // sessione cresce di `engine.stepCost` a ogni richiesta, che riporta 1000 token d'ingresso nuovi; il contesto è di `engine.tokens`.
 // Una richiesta il cui turnId è in `engine.gates` attende che il test risolva la sua promessa
