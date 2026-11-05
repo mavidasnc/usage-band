@@ -1176,3 +1176,57 @@ test('5h e 7g prendono il colore della percentuale arrotondata che mostrano', as
   expect((await ui.find({ type: 'Text', text: /^\S+ 90%$/ }))?.props.color).toBe('error')
   expect((await ui.find({ type: 'Text', text: /^\S+ 70%$/ }))?.props.color).toBe('warning')
 })
+
+// Ora locale HH:MM di un istante, come la mostra la barra
+const clockLabel = (ms: number) => {
+  const date = new Date(ms)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+// Istante fisso dei test sul ritmo
+const PACE_NOW = Date.parse('2026-11-05T10:00:00Z')
+
+// Monta la barra dopo una misura con i limiti indicati, all'istante PACE_NOW
+const mountWithLimits = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], rateLimits: unknown[]) => {
+  mock.clock(on, { now: PACE_NOW })
+  mock.env(on, {})
+  stubEngine(on)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  await $.session.start(START)
+  await $.session.measure({ context: { window: 200000, percent: 10 }, rateLimits, changed: ['context', 'rateLimits'] } as never)
+  return $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+}
+
+test("5h e 7g indicano se il consumo è più veloce o più lento del tempo e quando il limite si esaurirebbe", async ($, on) => {
+  const ui = await mountWithLimits($, on, [
+    // A metà finestra (2h30 alla fine) già al 75%: più veloce del tempo, al 100% fra 50 minuti, prima del reset
+    { kind: 'five_hour', percentUsed: 75, resetsAt: new Date(PACE_NOW + 2.5 * 3_600_000).toISOString() },
+    // A metà settimana al 31%: più lento, nessun esaurimento prima del reset
+    { kind: 'seven_day', percentUsed: 31, resetsAt: new Date(PACE_NOW + 3.5 * 86_400_000).toISOString() },
+  ])
+
+  expect(await ui.find({ text: new RegExp(`5h .* 75% ▲→${clockLabel(PACE_NOW + 50 * 60_000)} ↻`) })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: new RegExp(`^→${clockLabel(PACE_NOW + 50 * 60_000)}$`) }))?.props.color).toBe('error')
+  expect(await ui.find({ text: /7g .* 31% ▼ ↻/ })).toBeDefined()
+  expect(await ui.find({ text: /7g .* 31% ▼→/ })).toBeUndefined()
+})
+
+test('in linea col tempo, a inizio finestra o senza reset il ritmo non aggiunge previsioni', async ($, on) => {
+  const ui = await mountWithLimits($, on, [
+    // Nei primi minuti della finestra: più veloce del tempo, ma troppo presto per prevedere l'esaurimento
+    { kind: 'five_hour', percentUsed: 8, resetsAt: new Date(PACE_NOW + 4.9 * 3_600_000).toISOString() },
+    // In linea, appena sotto: a metà settimana il 48% (anche un punto sopra la linea esaurirebbe il limite prima del reset)
+    { kind: 'seven_day', percentUsed: 48, resetsAt: new Date(PACE_NOW + 3.5 * 86_400_000).toISOString() },
+  ])
+
+  expect(await ui.find({ text: /5h .* 8% ▲ ↻/ })).toBeDefined()
+  expect(await ui.find({ text: /→/ })).toBeUndefined()
+  expect(await ui.find({ text: /7g .* 48% ↻/ })).toBeDefined()
+})
+
+test('senza orario di reset il ritmo non compare', async ($, on) => {
+  const ui = await mountWithLimits($, on, [{ kind: 'five_hour', percentUsed: 95 }])
+
+  expect(await ui.find({ text: /5h .* 95%$/ })).toBeDefined()
+  expect(await ui.find({ text: /[▲▼→]/ })).toBeUndefined()
+})

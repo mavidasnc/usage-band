@@ -8,6 +8,10 @@ L'immagine è un'illustrazione con valori di esempio.
 
 - **5h**: percentuale usata della finestra di limite a 5 ore, con orario di reset.
 - **7g**: percentuale usata del limite settimanale, con giorno e orario di reset.
+- **ritmo** di 5h e 7g, subito dopo la percentuale: `▲` se il limite si consuma più in fretta del tempo che passa
+  nella finestra, `▼` se più lentamente, nulla se il consumo è in linea (entro 5 punti). Se al ritmo medio della finestra
+  il limite si esaurirebbe prima del reset, in rosso l'orario previsto: `5h ███████░░░ 72% ▲→16:40 ↻ 17:30`.
+  Nel primo 10% della finestra la previsione non compare.
 - **ctx**: percentuale di riempimento della finestra di contesto della conversazione.
   Un clic, a prompt vuoto, vi scrive (senza inviarla) la richiesta di valutare `/compact` con la percentuale attuale;
   se il prompt contiene già del testo non lo tocca e mostra un avviso.
@@ -73,6 +77,7 @@ claude plugin test .
 claude --plugin-dir <percorso>/usage-band
 ```
 
-La struttura segue le convenzioni dei mod: `hooks/register.tsx` contiene la logica,
+La struttura segue le convenzioni dei mod: `hooks/register.tsx` registra gli hook e disegna la barra, i moduli accanto
+(`hooks/pace.ts`, …) contengono la logica delle singole funzioni,
 `types/index.d.ts` il contratto dello stato, `hooks/register.test.ts` i test.
 Le modifiche sono elencate in [CHANGELOG.md](CHANGELOG.md).

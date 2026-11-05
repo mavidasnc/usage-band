@@ -10,6 +10,7 @@ import type {
 } from 'claude-code'
 
 import type { Limit, Operation, Snapshot } from '../types'
+import { pace, trendSymbol, WINDOW_MS, type Pace } from './pace'
 
 // Ultima misura dell'uso, letta dal disegno della barra
 const snapshot = atom({ plugin: 'usage-band', key: 'snapshot' } as const, null)
@@ -45,7 +46,7 @@ const operation = atom({ plugin: 'usage-band', key: 'operation' } as const, null
 // True quando i token mostrano il dettaglio (ingresso, uscita, letti dalla cache, agenti) invece del solo totale
 const isTokenDetailed = atom({ plugin: 'usage-band', key: 'isTokenDetailed' } as const, false)
 
-// Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset, cache)
+// Larghezza massima, in colonne, della riga dei consumi (5h, 7g e ctx con i reset, cache), senza le indicazioni del ritmo
 const USAGE_ROW_WIDTH = 106
 
 // Durate della cache del prompt, in millisecondi
@@ -83,6 +84,14 @@ const resetLabel = (iso: string) => {
   const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
   const isToday = date.toDateString() === new Date().toDateString()
   return isToday ? time : `${DAYS[date.getDay()]} ${time}`
+}
+
+// Testo del ritmo dopo la percentuale: la tendenza (" ▲") e l'orario previsto di esaurimento ("→16:40", col giorno se non è oggi),
+// separati dalla percentuale da uno spazio; vuoto se non c'è nulla da indicare
+const paceParts = (p: Pace | undefined) => {
+  const trend = p ? trendSymbol(p.trend) : ''
+  const exhaust = p?.exhaustAt != null ? `→${resetLabel(new Date(p.exhaustAt).toISOString())}` : ''
+  return { trend: trend && ` ${trend}`, exhaust: exhaust && `${trend ? '' : ' '}${exhaust}` }
 }
 
 // Cartella di lavoro con la sua cartella padre (es. projects\usage-band), separatore preso dal percorso
@@ -826,19 +835,27 @@ export const register: Register = on => {
     const sessionText = sessionUsd !== null && sessionUsd > 0 ? costLabel(sessionUsd) : null
     const { Box, Button, Text } = $.ui.resolve(e)
 
-    // Un segmento: etichetta, barra e percentuale colorate, reset opzionale. Colore e barra seguono la percentuale arrotondata
-    // dell'etichetta: un 89,6% è «90%» e rosso
-    const segment = (label: string, percent?: number, resetsAt?: string) => {
+    // Ritmo di 5h e 7g all'istante del disegno: tendenza rispetto al tempo trascorso e previsione di esaurimento prima del reset
+    const now = await $.clock.now().catch(() => Date.now())
+    const fivePace = pace(data.fiveHour, WINDOW_MS.fiveHour, now)
+    const sevenPace = pace(data.sevenDay, WINDOW_MS.sevenDay, now)
+
+    // Un segmento: etichetta, barra e percentuale colorate, ritmo e reset opzionali. Colore e barra seguono la percentuale arrotondata
+    // dell'etichetta: un 89,6% è «90%» e rosso. La tendenza è tenue, l'esaurimento previsto in rosso
+    const segment = (label: string, percent?: number, resetsAt?: string, p?: Pace) => {
       if (percent === undefined) {
         return <Text dimColor>{label} n/d</Text>
       }
       const shown = Math.round(percent)
+      const { trend, exhaust } = paceParts(p)
       return (
         <Text>
           <Text dimColor>{label} </Text>
           <Text color={colorFor(shown)}>
             {gauge(shown)} {shown}%
           </Text>
+          {trend ? <Text dimColor>{trend}</Text> : null}
+          {exhaust ? <Text color="error">{exhaust}</Text> : null}
           {resetsAt ? <Text dimColor> ↻ {resetLabel(resetsAt)}</Text> : null}
         </Text>
       )
@@ -884,9 +901,9 @@ export const register: Register = on => {
     const usageRow = (
       <Box>
         <Text>
-          {segment('5h', data?.fiveHour?.percent, data?.fiveHour?.resetsAt)}
+          {segment('5h', data?.fiveHour?.percent, data?.fiveHour?.resetsAt, fivePace)}
           <Text dimColor> │ </Text>
-          {segment('7g', data?.sevenDay?.percent, data?.sevenDay?.resetsAt)}
+          {segment('7g', data?.sevenDay?.percent, data?.sevenDay?.resetsAt, sevenPace)}
           <Text dimColor> │ </Text>
         </Text>
         {contextItem}
@@ -989,7 +1006,11 @@ export const register: Register = on => {
       : [tokens && `tkn ${operationText(tokens, detailed)}`, sessionText, folder, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
           .filter(Boolean)
           .join(' │ ').length + 3
-    const isWide = compact || USAGE_ROW_WIDTH + 6 + envLength <= (e.viewport?.columns ?? 0)
+    // La riga dei consumi si allunga delle indicazioni del ritmo di 5h e 7g
+    const paceLength = [fivePace, sevenPace]
+      .map(p => paceParts(p))
+      .reduce((sum, { trend, exhaust }) => sum + trend.length + exhaust.length, 0)
+    const isWide = compact || USAGE_ROW_WIDTH + paceLength + 6 + envLength <= (e.viewport?.columns ?? 0)
 
     // Separatore dalla chat: una riga vuota e una linea tenue larga quanto la band
     const separator = <Text dimColor>{'─'.repeat(Math.max(e.props.bodyColumns ?? 0, 1))}</Text>

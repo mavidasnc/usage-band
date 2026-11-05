@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.18.0] - 2026-11-05
+
+### Aggiunto
+- Ritmo di consumo su 5h e 7g: dopo la percentuale un `▲` se il limite si consuma più in fretta del tempo che passa nella finestra, un `▼` se più lentamente (scarto oltre 5 punti). Se al ritmo medio della finestra il limite si esaurirebbe prima del reset, compare in rosso l'orario previsto (`72% ▲→16:40 ↻ 17:30`), col giorno se non è oggi. Nel primo 10% della finestra la previsione non compare, perché la media è ancora poco affidabile; senza orario di reset il ritmo non compare.
+
 ## [0.17.5] - 2026-10-28
 
 ### Modificato
