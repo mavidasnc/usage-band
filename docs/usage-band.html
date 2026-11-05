@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>usage-band</title>
+<style>
+  :root {
+    --bg: #1e1e20;
+    --text: #e6e6e6;
+    --dim: #8b8b8f;
+    --success: #4cc56a;
+    --warning: #e5c03a;
+    --error: #e5534b;
+    --claude: #e8735a;
+    --auto: #a98bf5;
+    --suggestion: #b1b9f9;
+    --plan: #2ba3a3;
+    --merged: #af87ff;
+    --pink: #fd5db1;
+    --rule: #5a5a5e;
+  }
+  html, body { margin: 0; background: var(--bg); }
+  body {
+    width: 1310px;
+    padding: 18px 18px 22px;
+    box-sizing: border-box;
+    font-family: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
+    font-size: 15px;
+    line-height: 32px;
+    color: var(--text);
+    white-space: pre;
+  }
+  .title { color: var(--dim); margin-top: 6px; }
+  .title + .rule { margin-top: 10px; }
+  .rule { border-top: 2px solid var(--rule); margin: 0 0 4px; }
+  .box { border: 1px solid var(--rule); border-radius: 6px; padding: 4px 18px; margin: 4px 0 36px; font-weight: 700; }
+  .d { color: var(--dim); }
+  .s { color: var(--success); }
+  .w { color: var(--warning); }
+  .e { color: var(--error); }
+  .c { color: var(--claude); }
+  .a { color: var(--auto); }
+  .g { color: var(--suggestion); font-weight: 700; }
+  .p { color: var(--plan); }
+  .m { color: var(--merged); }
+  .k { color: var(--pink); }
+  .y { color: var(--warning); font-weight: 700; }
+  .b { font-weight: 700; }
+  .h { opacity: 0.45; }
+</style>
+</head>
+<body><div class="title">Preset completo, durante un turno</div><div class="rule"></div><div><span class="d">5h </span><span class="s">█████</span><span class="s h">░░░░░</span><span class="s b"> 48%</span><span class="d"> ▼ ↻ 14:30</span><span class="d"> │ </span><span class="d">7g </span><span class="s">███</span><span class="s h">░░░░░░░</span><span class="s b"> 31%</span><span class="d"> ▼ ↻ gio 09:00</span><span class="d"> │ </span><span class="d">ctx </span><span class="s">█████</span><span class="s h">░░░░░</span><span class="s b"> 47%</span><span class="d"> │ cache </span><span class="s">42m</span><span class="d"> │ [◂]</span></div><div>tkn 28.7k · $0.54 · 1:42 · 17.0k/min ▂▅▇▃<span class="d"> │ </span><span class="k">$12.30</span><span class="d"> │ </span><span class="y">projects\usage-band</span><span class="d"> │ </span><span class="m">main*</span><span class="d"> ↑1</span><span class="s"> +120</span><span class="e"> −34</span><span class="d"> │ </span><span class="c">Opus 5.5</span><span class="d"> │ </span><span class="a">high</span><span class="d"> │ </span><span class="g">utente@esempio.it</span><span class="d"> │ </span><span class="p">v1.0.0</span></div><div><span class="w">⟳ Bash</span><span class="d"> · </span><span class="a">∴ 2</span><span class="d"> · ✓ Read ×3 Edit ×2 Grep · ☐ 3/7</span></div><div class="box">&gt;</div><div class="title">Preset essential, vicino ai limiti, con la guardia accesa</div><div class="rule"></div><div><span class="d">5h </span><span class="e">██████████</span><span class="e b"> 96%</span><span class="e"> ⛨</span><span class="d"> ▲</span><span class="e">→14:05</span><span class="d"> ↻ 14:30</span><span class="d"> │ </span><span class="d">7g </span><span class="w">████████</span><span class="w h">░░</span><span class="w b"> 78%</span><span class="d"> ▲</span><span class="e">→ven 16:20</span><span class="d"> ↻ sab 09:00</span><span class="d"> │ </span><span class="d">ctx </span><span class="e">█████████</span><span class="e h">░</span><span class="e b"> 92%</span><span class="d"> │ cache </span><span class="e">4:12</span><span class="d"> · ripresa ≈ $1.80 │ [◂]</span></div><div>tkn 41.2k · $0.86<span class="d"> │ </span><span class="k">$27.40</span><span class="d"> │ </span><span class="m">main*</span><span class="d"> │ </span><span class="c">Opus 5.5</span><span class="d"> │ </span><span class="a">xhigh</span></div><div class="box">&gt;</div><div class="title">Preset minimal</div><div class="rule"></div><div><span class="d">5h </span><span class="s">██████</span><span class="s h">░░░░</span><span class="s b"> 55%</span><span class="d"> ↻ 14:30</span><span class="d"> │ </span><span class="d">7g </span><span class="s">███</span><span class="s h">░░░░░░░</span><span class="s b"> 31%</span><span class="d"> ↻ gio 09:00</span><span class="d"> │ </span><span class="d">ctx </span><span class="s">██</span><span class="s h">░░░░░░░░</span><span class="s b"> 22%</span><span class="d"> │ cache </span><span class="w">12m</span></div><div class="box" style="margin-bottom:0">&gt;</div></body>
+</html>
