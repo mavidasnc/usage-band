@@ -1521,3 +1521,90 @@ test('dopo uno strumento che può cambiare i file lo stato git si rilegge, una v
   await clock.advance(3_000)
   expect(repo.reads).toBe(readsBefore + 1)
 })
+
+// Barra completa per i test delle opzioni: repository git con modifiche, misura con 5h al 55% (in anticipo sul tempo) e 7g al
+// 65%, toast registrati; restituisce la barra montata e i toast
+const mountConfigured = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1]) => {
+  const { repo, clock } = stubGit(on)
+  repo.status = STATUS_MAIN
+  repo.diff = ' 1 file changed, 12 insertions(+), 3 deletions(-)\n'
+  mock.store(on)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('session.id', () => ({ value: 's1' }))
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.notify', () => ({ value: { isSent: true, channel: 'kitty' } }))
+  await $.session.start(START)
+  await $.session.measure({
+    context: { window: 200000, percent: 10 },
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 55, resetsAt: new Date(1_000_000 + 4 * 3_600_000).toISOString() },
+      { kind: 'seven_day', percentUsed: 65 },
+    ],
+    changed: ['context', 'rateLimits'],
+  } as never)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  return { ui, toasts }
+}
+
+test('con il preset predefinito la barra mostra tutto, con le soglie di 70 e 90', async ($, on) => {
+  const { ui, toasts } = await mountConfigured($, on)
+
+  expect(await ui.find({ text: /5h .* 55% ▲→/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^\S+ 55%$/ }))?.props.color).toBe('success')
+  expect(await ui.find({ text: /mio-progetto │ main\* ↑1 ↓2 \+12 −3 │ Opus/ })).toBeDefined()
+  expect(await ui.find({ text: 'v9.9.9' })).toBeDefined()
+  expect(await ui.find({ key: 'details' })).toBeDefined()
+  expect(toasts).toEqual([])
+})
+
+test('le soglie di /config cambiano colori e notifiche', { options: { warnThreshold: 50, errorThreshold: 60 } }, async ($, on) => {
+  const { ui, toasts } = await mountConfigured($, on)
+
+  expect((await ui.find({ type: 'Text', text: /^\S+ 55%$/ }))?.props.color).toBe('warning')
+  expect((await ui.find({ type: 'Text', text: /^\S+ 65%$/ }))?.props.color).toBe('error')
+  expect(toasts).toEqual([expect.stringMatching(/^🟡 Limite 5h al 55%/), '🔴 Limite 7g al 65%'])
+})
+
+test('soglie non valide (gialla non sotto la rossa) tornano a 70 e 90', { options: { warnThreshold: 95, errorThreshold: 90 } }, async ($, on) => {
+  const { ui } = await mountConfigured($, on)
+
+  expect((await ui.find({ type: 'Text', text: /^\S+ 65%$/ }))?.props.color).toBe('success')
+})
+
+test('il preset essential toglie cartella, email, versione e i dettagli di git', { options: { preset: 'essential' } }, async ($, on) => {
+  const { ui } = await mountConfigured($, on)
+
+  expect(await ui.find({ text: /5h .* 55% ▲→/ })).toBeDefined()
+  expect(await ui.find({ text: /^main\* │ Opus/ })).toBeDefined()
+  expect(await ui.find({ text: /mio-progetto/ })).toBeUndefined()
+  expect(await ui.find({ text: /↑1|\+12/ })).toBeUndefined()
+  expect(await ui.find({ text: 'v9.9.9' })).toBeUndefined()
+  expect(await ui.find({ key: 'details' })).toBeDefined()
+})
+
+test('il preset minimal lascia solo la riga dei consumi, senza ritmo né pulsante', { options: { preset: 'minimal' } }, async ($, on) => {
+  const { ui } = await mountConfigured($, on)
+
+  expect(await ui.find({ text: /5h .* 55% ↻/ })).toBeDefined()
+  expect(await ui.find({ text: /[▲▼]/ })).toBeUndefined()
+  expect(await ui.find({ key: 'details' })).toBeUndefined()
+  expect(await ui.find({ key: 'model' })).toBeUndefined()
+  expect(await ui.find({ text: /main/ })).toBeUndefined()
+})
+
+test(
+  'gli interruttori spengono ritmo, git e notifiche anche nel preset completo',
+  { options: { showPace: false, showGit: false, notifications: false, warnThreshold: 50 } },
+  async ($, on) => {
+    const { ui, toasts } = await mountConfigured($, on)
+
+    expect(await ui.find({ text: /[▲▼→]/ })).toBeUndefined()
+    expect(await ui.find({ text: /mio-progetto │ Opus/ })).toBeDefined()
+    expect(toasts).toEqual([])
+  },
+)

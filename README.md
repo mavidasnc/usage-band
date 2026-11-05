@@ -45,7 +45,7 @@ L'immagine è un'illustrazione con valori di esempio.
   (serve `claude` nel `PATH`; altrimenti viene dal file di configurazione di Claude Code, `.claude.json`).
 - **versione**: versione del mod (`vX.Y.Z`), in verde acqua.
 
-I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90%.
+I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90% (soglie impostabili in `/config`).
 
 **Notifiche.** Quando 5h, 7g o ctx passano in giallo o in rosso compare per 10 secondi un toast nel terminale, con un
 simbolo colorato in testa (`🟡 Limite 5h al 72%, reset 14:20`, `🔴 Contesto al 92%: valuta /compact`); per il rosso arriva anche la notifica di sistema
@@ -60,6 +60,16 @@ Subito dopo la cache, separato da una pipe, un pulsante (`[◂]`, cliccabile) na
 lasciando solo i consumi; `[▸]` li rimostra. La scelta vale per la sessione e resta dopo `/clear`.
 La barra è sempre visibile e cede il posto solo ai sondaggi di Claude Code.
 I limiti 5h e settimanale esistono solo con un abbonamento Claude (Pro, Max, Team).
+
+## Opzioni
+
+In `/config`, alle righe che iniziano con «usage-band:» (una modifica vale subito):
+
+- **preset**: `full` mostra tutte le voci (predefinito); `essential` lascia consumi con ritmo, token, costo della sessione,
+  branch git con `*`, modello ed effort; `minimal` solo la riga dei consumi, senza ritmo né pulsante `[◂]`.
+- **soglia gialla** e **soglia rossa** (70 e 90): colori di 5h, 7g e ctx e notifiche. La gialla deve essere minore della rossa,
+  altrimenti valgono 70 e 90.
+- **ritmo di consumo**, **notifiche di soglia**, **stato git**: interruttori che spengono la funzione anche nel preset completo.
 
 ## Comandi
 

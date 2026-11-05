@@ -2,6 +2,15 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.21.0] - 2026-11-05
+
+### Aggiunto
+- Opzioni in `/config` (righe «usage-band: …»):
+  - **preset**: `full` (tutte le voci, predefinito), `essential` (consumi con ritmo, token, costo della sessione, branch git con `*`, modello, effort; senza cartella, email, versione e dettagli di git) o `minimal` (solo la riga dei consumi, senza ritmo né pulsante `[◂]`);
+  - **soglia gialla** e **soglia rossa** (70 e 90 di default), usate da colori e notifiche; valori fuori scala vengono ricondotti tra 1 e 100, e una gialla non minore della rossa riporta entrambe a 70 e 90;
+  - interruttori per **ritmo di consumo**, **notifiche di soglia** e **stato git**, che tolgono la funzione anche dal preset completo.
+- Una modifica in `/config` ricarica il mod e vale subito. Il pulsante `[◂]`/`[▸]` resta una scelta della sessione.
+
 ## [0.20.0] - 2026-11-05
 
 ### Aggiunto

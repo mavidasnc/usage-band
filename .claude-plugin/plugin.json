@@ -1,7 +1,50 @@
 {
   "name": "usage-band",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "Barra sopra il prompt con % limite 5h, % limite settimanale e % contesto, colorate per soglia.",
   "author": { "name": "Maurizio Pelizzone" },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "preset": {
+      "type": "string",
+      "title": "usage-band: preset",
+      "description": "full: tutte le voci. essential: consumi con ritmo, token, costo, branch git, modello, effort. minimal: solo la riga dei consumi.",
+      "default": "full",
+      "options": ["full", "essential", "minimal"]
+    },
+    "warnThreshold": {
+      "type": "number",
+      "title": "usage-band: soglia gialla (%)",
+      "description": "Da questa percentuale 5h, 7g e ctx diventano gialli e arriva la notifica. Deve essere minore della soglia rossa.",
+      "default": 70,
+      "min": 1,
+      "max": 100
+    },
+    "errorThreshold": {
+      "type": "number",
+      "title": "usage-band: soglia rossa (%)",
+      "description": "Da questa percentuale 5h, 7g e ctx diventano rossi e arriva anche la notifica di sistema.",
+      "default": 90,
+      "min": 1,
+      "max": 100
+    },
+    "showPace": {
+      "type": "boolean",
+      "title": "usage-band: ritmo di consumo",
+      "description": "▲/▼ e orario previsto di esaurimento dopo le percentuali di 5h e 7g.",
+      "default": true
+    },
+    "notifications": {
+      "type": "boolean",
+      "title": "usage-band: notifiche di soglia",
+      "description": "Toast e notifiche di sistema quando 5h, 7g e ctx passano in giallo o in rosso, e all'azzeramento del 5h.",
+      "default": true
+    },
+    "showGit": {
+      "type": "boolean",
+      "title": "usage-band: stato git",
+      "description": "Branch, modifiche, avanti/indietro e righe cambiate nella riga ambiente.",
+      "default": true
+    }
+  }
 }

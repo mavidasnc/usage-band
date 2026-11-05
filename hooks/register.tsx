@@ -12,6 +12,7 @@ import type {
 import type { Limit, Operation, Snapshot } from '../types'
 import { GIT_DEBOUNCE_MS, GIT_TOOLS, gitFor, gitLabel, scheduleGit } from './git'
 import { checkThresholds } from './notify'
+import { applyOptions, levelFor, visibleItems } from './options'
 import { pace, trendSymbol, WINDOW_MS, type Pace } from './pace'
 
 // Ultima misura dell'uso, letta dal disegno della barra
@@ -62,9 +63,9 @@ const BAR_WIDTH = 10
 
 const DAYS = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']
 
-// Colore per soglia, con le chiavi del tema: verde < 70, giallo 70-90, rosso >= 90
-const colorFor = (percent: number) =>
-  percent >= 90 ? 'error' : percent >= 70 ? 'warning' : 'success'
+// Colore per soglia, con le chiavi del tema: verde, giallo e rosso secondo le soglie di /config (70 e 90 di default)
+const LEVEL_COLORS = ['success', 'warning', 'error'] as const
+const colorFor = (percent: number) => LEVEL_COLORS[levelFor(percent)]
 
 // Barra a blocchi: pieni per la parte usata, vuoti per il resto
 const gauge = (percent: number) => {
@@ -666,7 +667,10 @@ const fill = async ($: EngineInterface) => {
   })().catch(() => undefined)
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  // Opzioni di /config: una modifica ricarica il mod e le riapplica
+  applyOptions(options)
+
   // All'avvio (e dopo ogni reload) registra il comando e prende subito le cifre correnti
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -881,9 +885,11 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
 
     // Ritmo di 5h e 7g all'istante del disegno: tendenza rispetto al tempo trascorso e previsione di esaurimento prima del reset
+    // Voci che preset e interruttori di /config lasciano visibili
+    const visible = visibleItems()
     const now = await $.clock.now().catch(() => Date.now())
-    const fivePace = pace(data.fiveHour, WINDOW_MS.fiveHour, now)
-    const sevenPace = pace(data.sevenDay, WINDOW_MS.sevenDay, now)
+    const fivePace = visible.pace ? pace(data.fiveHour, WINDOW_MS.fiveHour, now) : undefined
+    const sevenPace = visible.pace ? pace(data.sevenDay, WINDOW_MS.sevenDay, now) : undefined
 
     // Un segmento: etichetta, barra e percentuale colorate, ritmo e reset opzionali. Colore e barra seguono la percentuale arrotondata
     // dell'etichetta: un 89,6% è «90%» e rosso. La tendenza è tenue, l'esaurimento previsto in rosso
@@ -989,51 +995,74 @@ export const register: Register = on => {
       )
     }
 
-    // Riga dell'ambiente: token, costo della sessione, cartella (gialla), stato git (branch in viola, righe aggiunte e tolte in verde
-    // e rosso), modello (arancio), effort (viola), email (azzurra) e versione
-    // del mod (verde acqua); token, costo, effort, email e versione compaiono quando sono noti. Modello ed effort sono pulsanti che
-    // eseguono /model e /effort, quindi stanno fuori dai Text
+    // Voci della riga dell'ambiente presenti: visibili per preset e interruttori e con un dato
+    const gitShown = git && visible.git ? git : null
+    const present = {
+      tokens: visible.tokens && tokens !== null,
+      sessionCost: visible.sessionCost && sessionItem !== null,
+      folder: visible.folder,
+      git: gitShown !== null,
+      model: visible.model,
+      effort: visible.effort && level !== null,
+      email: visible.email && Boolean(account),
+      version: visible.version && Boolean(modVersion),
+    }
+    type EnvItem = keyof typeof present
+    const ENV_ORDER: readonly EnvItem[] = ['tokens', 'sessionCost', 'folder', 'git', 'model', 'effort', 'email', 'version']
+    // Separatore prima di una voce, solo se prima c'è un'altra voce presente
+    const sep = (item: EnvItem) =>
+      present[item] && ENV_ORDER.slice(0, ENV_ORDER.indexOf(item)).some(other => present[other]) ? <Text dimColor> │ </Text> : null
+
+    // Stato git: branch in viola con * per le modifiche; nel preset Full anche avanti/indietro (tenui) e righe aggiunte e tolte
+    const gitItem = gitShown ? (
+      <Text>
+        <Text color="merged">
+          {gitShown.branch}
+          {gitShown.isDirty ? '*' : ''}
+        </Text>
+        {visible.gitDetail && (gitShown.ahead || gitShown.behind) ? (
+          <Text dimColor>
+            {gitShown.ahead ? ` ↑${gitShown.ahead}` : ''}
+            {gitShown.behind ? ` ↓${gitShown.behind}` : ''}
+          </Text>
+        ) : null}
+        {visible.gitDetail && gitShown.added ? <Text color="success"> +{gitShown.added}</Text> : null}
+        {visible.gitDetail && gitShown.removed ? <Text color="error"> −{gitShown.removed}</Text> : null}
+      </Text>
+    ) : null
+    const gitShownText = gitShown ? (visible.gitDetail ? gitText : `${gitShown.branch}${gitShown.isDirty ? '*' : ''}`) : null
+
+    // Riga dell'ambiente: token, costo della sessione, cartella (gialla), stato git, modello (arancio), effort (viola), email (azzurra)
+    // e versione del mod (verde acqua), ognuna se il preset la prevede e ha un dato. Modello ed effort sono pulsanti che eseguono
+    // /model e /effort, quindi stanno fuori dai Text
     const envRow = (
       <Box>
-        {tokenItem}
+        {present.tokens ? tokenItem : null}
         <Text>
-          {tokens ? <Text dimColor> │ </Text> : null}
-          {sessionItem}
-          {sessionItem ? <Text dimColor> │ </Text> : null}
-          <Text color="warning">{folder}</Text>
-          <Text dimColor> │ </Text>
-          {git ? (
-            <Text>
-              <Text color="merged">
-                {git.branch}
-                {git.isDirty ? '*' : ''}
-              </Text>
-              {git.ahead || git.behind ? (
-                <Text dimColor>
-                  {git.ahead ? ` ↑${git.ahead}` : ''}
-                  {git.behind ? ` ↓${git.behind}` : ''}
-                </Text>
-              ) : null}
-              {git.added ? <Text color="success"> +{git.added}</Text> : null}
-              {git.removed ? <Text color="error"> −{git.removed}</Text> : null}
-            </Text>
-          ) : null}
-          {git ? <Text dimColor> │ </Text> : null}
+          {sep('sessionCost')}
+          {present.sessionCost ? sessionItem : null}
+          {sep('folder')}
+          {present.folder ? <Text color="warning">{folder}</Text> : null}
+          {sep('git')}
+          {present.git ? gitItem : null}
+          {sep('model')}
         </Text>
-        <Button key="model" label={model} plain onPress={() => runCommand('model')}>
-          <Text color="claude">{model}</Text>
-        </Button>
-        {level !== null ? <Text dimColor> │ </Text> : null}
-        {level !== null ? (
+        {present.model ? (
+          <Button key="model" label={model} plain onPress={() => runCommand('model')}>
+            <Text color="claude">{model}</Text>
+          </Button>
+        ) : null}
+        {sep('effort')}
+        {present.effort ? (
           <Button key="effort" label={String(level)} plain onPress={() => runCommand('effort')}>
             <Text color="autoAccept">{level}</Text>
           </Button>
         ) : null}
         <Text>
-          {account ? <Text dimColor> │ </Text> : null}
-          {account ? <Text color="suggestion">{account}</Text> : null}
-          {modVersion ? <Text dimColor> │ </Text> : null}
-          {modVersion ? <Text color="planMode">v{modVersion}</Text> : null}
+          {sep('email')}
+          {present.email ? <Text color="suggestion">{account}</Text> : null}
+          {sep('version')}
+          {present.version ? <Text color="planMode">v{modVersion}</Text> : null}
         </Text>
       </Box>
     )
@@ -1064,10 +1093,20 @@ export const register: Register = on => {
 
     // Tutto su una riga se c'è posto, altrimenti due righe: una riga troppo lunga andrebbe a capo e si perderebbe la coda.
     // Compatta la riga dell'ambiente sparisce e restano consumi e pulsante (" │ [▸]")
+    const envTexts: Record<EnvItem, string | null> = {
+      tokens: tokens && `tkn ${operationText(tokens, detailed)}`,
+      sessionCost: sessionText,
+      folder,
+      git: gitShownText,
+      model,
+      effort: level === null ? null : String(level),
+      email: account,
+      version: modVersion && `v${modVersion}`,
+    }
     const envLength = compact
       ? 0
-      : [tokens && `tkn ${operationText(tokens, detailed)}`, sessionText, folder, gitText, model, level !== null && String(level), account, modVersion && `v${modVersion}`]
-          .filter(Boolean)
+      : ENV_ORDER.filter(item => present[item])
+          .map(item => envTexts[item] ?? '')
           .join(' │ ').length + 3
     // La riga dei consumi si allunga delle indicazioni del ritmo di 5h e 7g
     const paceLength = [fivePace, sevenPace]
@@ -1077,6 +1116,16 @@ export const register: Register = on => {
 
     // Separatore dalla chat: una riga vuota e una linea tenue larga quanto la band
     const separator = <Text dimColor>{'─'.repeat(Math.max(e.props.bodyColumns ?? 0, 1))}</Text>
+
+    // Preset Minimal: solo la riga dei consumi, senza pulsante né riga dell'ambiente
+    if (!visible.envRow) {
+      return (
+        <Box flexDirection="column" marginTop={1}>
+          {separator}
+          {usageRow}
+        </Box>
+      )
+    }
 
     return (
       <Box flexDirection="column" marginTop={1}>

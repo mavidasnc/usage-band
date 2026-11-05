@@ -4,16 +4,9 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Limit, Snapshot } from '../types'
+import { levelFor, settings } from './options'
 
-// Soglie dei livelli, le stesse dei colori della barra: giallo da 70, rosso da 90
-const WARN_AT = 70
-const ERROR_AT = 90
-
-// Livello di una percentuale arrotondata: 0 verde, 1 giallo, 2 rosso
-export const levelFor = (percent: number) => {
-  const shown = Math.round(percent)
-  return shown >= ERROR_AT ? 2 : shown >= WARN_AT ? 1 : 0
-}
+// I livelli (giallo e rosso) seguono le soglie dei colori della barra, impostabili in /config
 
 // Durata dei toast, in millisecondi (il motore di suo li tiene 4 secondi)
 const TOAST_MS = 10_000
@@ -193,6 +186,9 @@ async function scheduleReset($: EngineInterface, limit: Limit | undefined) {
 
 // Controlla una misura: soglie di 5h, 7g e contesto e timer dell'azzeramento del 5h. Non lancia mai: le notifiche sono accessorie
 export async function checkThresholds($: EngineInterface, measured: Snapshot) {
+  if (!settings().notifications) {
+    return
+  }
   try {
     await checkLimit($, 'fiveHour', measured.fiveHour)
     await checkLimit($, 'sevenDay', measured.sevenDay)
