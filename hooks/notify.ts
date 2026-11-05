@@ -60,8 +60,40 @@ const resetText = (iso: string) => {
   return date.toDateString() === new Date().toDateString() ? time : `${DAYS[date.getDay()]} ${time}`
 }
 
-// Toast sempre, col simbolo del tipo in testa; al rosso e all'azzeramento anche la notifica di sistema, col solo testo.
-// Un canale che non risponde non ferma l'altro
+// Notifica nativa di Windows (centro notifiche) con l'API WinRT, a nome di PowerShell: titolo e testo arrivano dalle variabili
+// d'ambiente, mai dentro lo script, e sono codificati per l'XML della notifica
+const WINDOWS_TOAST_SCRIPT = [
+  '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
+  '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
+  '$title = [Security.SecurityElement]::Escape($env:USAGE_BAND_TITLE)',
+  '$text = [Security.SecurityElement]::Escape($env:USAGE_BAND_TEXT)',
+  '$xml = New-Object Windows.Data.Xml.Dom.XmlDocument',
+  `$xml.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$title</text><text>$text</text></binding></visual></toast>")`,
+  '$toast = New-Object Windows.UI.Notifications.ToastNotification $xml',
+  String.raw`[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show($toast)`,
+].join('; ')
+
+// True su Windows: la variabile OS che il sistema imposta per ogni processo
+async function isWindows($: EngineInterface) {
+  return (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
+}
+
+// Ripiego su Windows quando la notifica del terminale non ha un canale vero (Windows Terminal non ha una sequenza di notifica:
+// al più suona il campanello). Non attende PowerShell, che impiega circa mezzo secondo
+async function notifyWindows($: EngineInterface, title: string, text: string) {
+  if (!(await isWindows($))) {
+    return
+  }
+  void $.process
+    .run(['powershell', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_TOAST_SCRIPT], {
+      env: { USAGE_BAND_TITLE: title, USAGE_BAND_TEXT: text },
+      timeoutMs: 15_000,
+    })
+    .catch(() => undefined)
+}
+
+// Toast sempre, col simbolo del tipo in testa; al rosso e all'azzeramento anche la notifica di sistema, col solo testo, e su
+// Windows quella nativa se il terminale non ne ha una. Un canale che non risponde non ferma gli altri
 async function send($: EngineInterface, text: string, alert: Alert) {
   try {
     $.ui.toast(`${SYMBOL[alert]} ${text}`, { timeoutMs: TOAST_MS })
@@ -69,7 +101,12 @@ async function send($: EngineInterface, text: string, alert: Alert) {
     // toast non disponibile: resta la notifica di sistema, se urgente
   }
   if (alert !== 'warn') {
-    await $.ui.notify(text, { title: 'usage-band' }).catch(() => undefined)
+    const result = await $.ui.notify(text, { title: 'usage-band' }).catch(() => undefined)
+    // solo un rifiuto esplicito di un altro plugin non va scavalcato; il campanello non mostra il testo
+    const isShown = result?.isSent === true && result.channel !== 'terminal_bell'
+    if (!isShown && !(result?.isSent === false && result.reason === 'refused')) {
+      await notifyWindows($, 'usage-band', text)
+    }
   }
 }
 

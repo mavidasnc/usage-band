@@ -342,17 +342,22 @@ test('il pulsante nasconde e rimostra cartella, modello, effort, email e version
 })
 
 // Il motore sotto la band per i test della cache e dei token: dati minimi e turn.step che risponde senza chunk,
-// con i token che `usages` assegna alla richiesta (turno/indice), se ci sono, e il costo della sessione in `cost.usd`, se c'è
+// con i token che `usages` assegna alla richiesta (turno/indice), se ci sono, e il costo della sessione in `cost.usd`, se c'è;
+// `onRun`, se c'è, riceve ogni comando lanciato
 const stubEngine = (
   on: Parameters<TestBody>[1],
   usages: Record<string, unknown> = {},
   cost: { usd?: number } = {},
+  onRun?: (argv: readonly string[], env?: Record<string, string>) => void,
 ) => {
   on('session.start', () => ({ cwd: '' }))
   on('session.cwd', () => ({ value: 'C:\\Users\\maurizio\\Claude\\mio-progetto' }))
   on('session.model', () => ({ value: 'opus' }))
   on('fs.read', () => ({ value: JSON.stringify({ name: 'usage-band', version: '9.9.9' }) }))
-  on('process.run', () => ran('', 1))
+  on('process.run', (_$, e) => {
+    onRun?.(e.argv, e.init?.env)
+    return ran('', 1)
+  })
   on('command.register', () => ({ value: { command: 'usage-band' } }))
   on('session.usage', () => ({
     value: { startedAt: 0, context: { window: 200000 }, rateLimits: [], ...(cost.usd === undefined ? {} : { cost: { usd: cost.usd } }) },
@@ -1235,17 +1240,25 @@ test('senza orario di reset il ritmo non compare', async ($, on) => {
   expect(await ui.find({ text: /[▲▼→]/ })).toBeUndefined()
 })
 
-// Motore per i test delle notifiche: orologio fermo a PACE_NOW, store in memoria (con i valori iniziali indicati),
-// toast e notifiche di sistema registrati; `measure` invia una misura con contesto e limiti
+// Motore per i test delle notifiche: orologio fermo a PACE_NOW, store in memoria (con i valori iniziali indicati), variabili
+// d'ambiente e risposta della notifica di sistema a scelta; toast, notifiche di sistema e comandi PowerShell registrati.
+// `measure` invia una misura con contesto e limiti
 const stubNotifications = async (
   $: Parameters<TestBody>[0],
   on: Parameters<TestBody>[1],
   stored: Record<string, unknown> = {},
+  { env = {}, notified = { isSent: true, channel: 'kitty' } }: { env?: Record<string, string>; notified?: unknown } = {},
 ) => {
   const clock = mock.clock(on, { now: PACE_NOW })
-  mock.env(on, {})
+  mock.env(on, env)
   mock.store(on, stored)
-  stubEngine(on)
+  // Le notifiche native di Windows: i comandi PowerShell lanciati
+  const powershell: { argv: readonly string[]; env?: Record<string, string> }[] = []
+  stubEngine(on, {}, {}, (argv, env) => {
+    if (argv[0] === 'powershell') {
+      powershell.push({ argv, env })
+    }
+  })
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('session.id', () => ({ value: 's1' }))
   const toasts: string[] = []
@@ -1258,12 +1271,12 @@ const stubNotifications = async (
   })
   on('ui.notify', (_$, e) => {
     notices.push(e.text)
-    return { value: { isSent: true, channel: 'terminal_bell' } }
+    return { value: notified as never }
   })
   await $.session.start(START)
   const measure = (context: number | undefined, rateLimits: unknown[]) =>
     $.session.measure({ context: { window: 200000, percent: context }, rateLimits, changed: ['context', 'rateLimits'] } as never)
-  return { clock, toasts, notices, measure }
+  return { clock, toasts, notices, powershell, measure }
 }
 
 // Reset del 5h fra 2h30 da PACE_NOW
@@ -1348,4 +1361,63 @@ test("una misura della finestra nuova prima del timer annuncia comunque l'azzera
   // La finestra nuova resta verde: al suo reset nessun avviso
   await clock.advance(6 * 3_600_000)
   expect(toasts).toHaveLength(2)
+})
+
+test('su Windows, se il terminale non ha una notifica di sistema, arriva quella nativa di Windows', async ($, on) => {
+  const { powershell, measure, clock } = await stubNotifications($, on, {}, {
+    env: { OS: 'Windows_NT' },
+    notified: { isSent: false, reason: 'no-channel' },
+  })
+
+  // Il giallo resta solo un toast
+  await measure(75, [])
+  await clock.settle()
+  expect(powershell).toEqual([])
+
+  // Il rosso passa anche dalla notifica nativa, col testo nelle variabili d'ambiente e non nello script
+  await measure(92, [])
+  await clock.settle()
+  expect(powershell).toHaveLength(1)
+  expect(powershell[0]?.argv.slice(0, 4)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-Command'])
+  expect(powershell[0]?.argv[4]).toContain('ToastNotificationManager')
+  expect(powershell[0]?.argv[4]).not.toContain('92%')
+  expect(powershell[0]?.env).toEqual({ USAGE_BAND_TITLE: 'usage-band', USAGE_BAND_TEXT: 'Contesto al 92%: valuta /compact' })
+})
+
+test('col solo campanello del terminale la notifica nativa di Windows arriva lo stesso', async ($, on) => {
+  const { powershell, measure, clock } = await stubNotifications($, on, {}, {
+    env: { OS: 'Windows_NT' },
+    notified: { isSent: true, channel: 'terminal_bell' },
+  })
+
+  await measure(92, [])
+  await clock.settle()
+  expect(powershell).toHaveLength(1)
+})
+
+test('la notifica nativa non parte se il terminale ha mostrato la sua', async ($, on) => {
+  // Terminale con notifica vera (kitty), su Windows
+  const shown = await stubNotifications($, on, {}, { env: { OS: 'Windows_NT' } })
+  await shown.measure(92, [])
+  await shown.clock.settle()
+  expect(shown.powershell).toEqual([])
+})
+
+test('fuori da Windows non parte la notifica nativa', async ($, on) => {
+  const { powershell, measure, clock } = await stubNotifications($, on, {}, { notified: { isSent: false, reason: 'no-channel' } })
+
+  await measure(92, [])
+  await clock.settle()
+  expect(powershell).toEqual([])
+})
+
+test('una notifica di sistema rifiutata da un plugin non passa dalla notifica nativa', async ($, on) => {
+  const { powershell, measure, clock } = await stubNotifications($, on, {}, {
+    env: { OS: 'Windows_NT' },
+    notified: { isSent: false, reason: 'refused' },
+  })
+
+  await measure(92, [])
+  await clock.settle()
+  expect(powershell).toEqual([])
 })

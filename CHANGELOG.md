@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.19.1] - 2026-11-05
+
+### Corretto
+- Su Windows le notifiche di sistema (livello rosso e azzeramento del 5h) arrivano nel centro notifiche di Windows: Windows Terminal non ha una notifica di sistema propria e prima, al più, suonava il campanello. La notifica nativa parte solo se il terminale non ne ha mostrata una sua e compare a nome di Windows PowerShell.
+
 ## [0.19.0] - 2026-11-05
 
 ### Aggiunto
