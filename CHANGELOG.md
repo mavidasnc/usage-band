@@ -2,6 +2,12 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [0.24.0] - 2026-11-05
+
+### Aggiunto
+- Guardia sui limiti, spenta di default (`/config` → **guardia sui limiti**): quando il limite 5h o settimanale raggiunge la **soglia della guardia** (95% di default) i subagenti non partono, anche quelli lanciati dai workflow. Il modello riceve il motivo con la percentuale e l'orario di reset e prosegue nel thread principale; a te arriva il toast `⛨ Subagente bloccato: limite 5h al 96%`. I prompt passano sempre.
+- Accanto alla percentuale del limite che fa scattare la guardia compare `⛨` in rosso.
+
 ## [0.23.0] - 2026-11-05
 
 ### Aggiunto

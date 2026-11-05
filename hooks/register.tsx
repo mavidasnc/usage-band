@@ -22,6 +22,7 @@ import {
   toolFinished,
   toolStarted,
 } from './activity'
+import { guardHit, guardMessage, isGuarded } from './guard'
 import { GIT_DEBOUNCE_MS, GIT_TOOLS, gitFor, gitLabel, scheduleGit } from './git'
 import { checkThresholds, sendAlert } from './notify'
 import { applyOptions, levelFor, settings, visibleItems } from './options'
@@ -801,8 +802,19 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Ogni subagente appartiene all'operazione in cui è nato: quella corrente, o quella dell'agente che l'ha lanciato
+  // Ogni subagente appartiene all'operazione in cui è nato: quella corrente, o quella dell'agente che l'ha lanciato.
+  // Con la guardia accesa e un limite oltre la soglia il subagente non parte: il modello riceve il motivo, la persona un toast
   on('agent.spawn', async ($, e, next) => {
+    const limits = await read($, snapshot).catch(() => null)
+    const hit = guardHit(limits?.fiveHour ?? lastLimits.fiveHour, limits?.sevenDay ?? lastLimits.sevenDay)
+    if (hit) {
+      try {
+        $.ui.toast(`⛨ Subagente bloccato: limite ${hit.label} al ${Math.round(hit.limit.percent)}%`, { timeoutMs: 10_000 })
+      } catch {
+        // toast non disponibile: il rifiuto vale lo stesso
+      }
+      return { deny: guardMessage(hit) }
+    }
     const result = await next(e)
     const owner = e.parentAgentId === undefined ? (await read($, operation))?.id : agentOperation.get(e.parentAgentId)
     if (result.agentId && owner) {
@@ -994,12 +1006,15 @@ export const register: Register = (on, options) => {
       }
       const shown = Math.round(percent)
       const { trend, exhaust } = paceParts(p)
+      // la guardia blocca i subagenti per questo limite
+      const guarded = label !== 'ctx' && isGuarded({ percent })
       return (
         <Text>
           <Text dimColor>{label} </Text>
           <Text color={colorFor(shown)}>
             {gauge(shown)} {shown}%
           </Text>
+          {guarded ? <Text color="error"> ⛨</Text> : null}
           {trend ? <Text dimColor>{trend}</Text> : null}
           {exhaust ? <Text color="error">{exhaust}</Text> : null}
           {resetsAt ? <Text dimColor> ↻ {resetLabel(resetsAt)}</Text> : null}
@@ -1214,7 +1229,7 @@ export const register: Register = (on, options) => {
       .map(p => paceParts(p))
       .reduce((sum, { trend, exhaust }) => sum + trend.length + exhaust.length, 0)
     // e del costo di una ripresa accanto alla cache
-    const resumeLength = resumeText ? ` · ${resumeText}`.length : 0
+    const resumeLength = (resumeText ? ` · ${resumeText}`.length : 0) + [data.fiveHour, data.sevenDay].filter(l => isGuarded(l)).length * 2
     const isWide = compact || USAGE_ROW_WIDTH + paceLength + resumeLength + 6 + envLength <= (e.viewport?.columns ?? 0)
 
     // Separatore dalla chat: una riga vuota e una linea tenue larga quanto la band

@@ -1806,3 +1806,66 @@ test("con l'interruttore dell'attività spento la riga non compare", { options: 
 
   expect(await (await mount()).find({ text: /✓/ })).toBeUndefined()
 })
+
+// Motore per i test della guardia: misura con i limiti indicati, subagenti che partono se nessuno li blocca, toast registrati
+const stubGuard = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], rateLimits: unknown[]) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.env(on, {})
+  mock.store(on)
+  stubEngine(on)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('session.id', () => ({ value: 's1' }))
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  const toasts: string[] = []
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.notify', () => ({ value: { isSent: true, channel: 'kitty' } }))
+  await $.session.start(START)
+  await $.session.measure({ context: { window: 200000, percent: 10 }, rateLimits, changed: ['context', 'rateLimits'] } as never)
+  const spawn = () =>
+    $.agent.spawn({ prompt: 'cerca', description: 'cerca', subagentType: 'Explore', parentModel: 'opus', background: false, fork: false } as never)
+  const mount = () => $.ui.mount({ plugin: 'usage-band', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  return { toasts, spawn, mount }
+}
+
+test('con la guardia accesa un limite oltre la soglia blocca i subagenti', { options: { guard: true, guardThreshold: 90, notifications: false } }, async ($, on) => {
+  const { toasts, spawn, mount } = await stubGuard($, on, [
+    { kind: 'five_hour', percentUsed: 92, resetsAt: new Date(1_000_000 + 3_600_000).toISOString() },
+    { kind: 'seven_day', percentUsed: 40 },
+  ])
+
+  const result = await spawn()
+  expect(result.agentId).toBeUndefined()
+  expect(result.deny).toMatch(/^usage-band: limite 5h al 92% \(reset \d{2}:\d{2}\), oltre la soglia della guardia\. I subagenti sono bloccati/)
+  expect(toasts).toEqual(['⛨ Subagente bloccato: limite 5h al 92%'])
+  // Il segno della guardia accanto al limite che la fa scattare, non all'altro
+  const ui = await mount()
+  expect(await ui.find({ text: /5h .* 92% ⛨/ })).toBeDefined()
+  expect(await ui.find({ text: /7g .* 40% ⛨/ })).toBeUndefined()
+})
+
+test('la guardia scatta anche per il limite settimanale', { options: { guard: true, notifications: false } }, async ($, on) => {
+  const { spawn } = await stubGuard($, on, [
+    { kind: 'five_hour', percentUsed: 20 },
+    { kind: 'seven_day', percentUsed: 96 },
+  ])
+
+  expect((await spawn()).deny).toMatch(/^usage-band: limite 7g al 96%, oltre/)
+})
+
+test('sotto la soglia della guardia i subagenti partono', { options: { guard: true, notifications: false } }, async ($, on) => {
+  const { toasts, spawn, mount } = await stubGuard($, on, [{ kind: 'five_hour', percentUsed: 94 }])
+
+  expect((await spawn()).agentId).toBe('a1')
+  expect(toasts).toEqual([])
+  expect(await (await mount()).find({ text: /⛨/ })).toBeUndefined()
+})
+
+test('la guardia è spenta di default: anche al 99% i subagenti partono', { options: { notifications: false } }, async ($, on) => {
+  const { spawn, mount } = await stubGuard($, on, [{ kind: 'five_hour', percentUsed: 99 }])
+
+  expect((await spawn()).agentId).toBe('a1')
+  expect(await (await mount()).find({ text: /⛨/ })).toBeUndefined()
+})

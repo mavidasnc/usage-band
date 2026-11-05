@@ -55,6 +55,10 @@ L'immagine è un'illustrazione con valori di esempio.
 gli strumenti già usati dal prompt e dai suoi subagenti (i cinque più usati) e l'avanzamento della lista di attività del modello.
 A turno finito la riga sparisce; c'è solo nel preset `full` e si nasconde con `[◂]`.
 
+**Guardia.** Se attivata in `/config`, quando il limite 5h o settimanale arriva alla soglia della guardia (95%) i subagenti
+non partono, anche quelli dei workflow: il modello riceve il motivo e prosegue nel thread principale, e accanto al limite compare
+`⛨`. I prompt passano sempre. Serve a non bruciare il resto del limite con agenti in parallelo.
+
 I colori seguono il tema: verde sotto il 70%, giallo tra 70% e 90%, rosso da 90% (soglie impostabili in `/config`).
 
 **Notifiche.** Quando 5h, 7g o ctx passano in giallo o in rosso compare per 10 secondi un toast nel terminale, con un
@@ -81,6 +85,7 @@ In `/config`, alle righe che iniziano con «usage-band:» (una modifica vale sub
   altrimenti valgono 70 e 90.
 - **ritmo di consumo**, **notifiche di soglia**, **stato git**, **costo di ripresa**, **attività durante il turno**: interruttori che spengono la funzione anche
   nel preset completo.
+- **guardia sui limiti** (spenta) e **soglia della guardia (%)** (95): blocco dei subagenti vicino ai limiti.
 - **avviso costo di ripresa ($)**: la cifra oltre la quale, con la cache nel rosso, arriva l'avviso (0.50; 0 lo spegne).
 
 ## Comandi

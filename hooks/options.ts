@@ -19,6 +19,8 @@ export type Settings = {
   showResumeCost: boolean
   resumeAlertUsd: number
   showActivity: boolean
+  guard: boolean
+  guardThreshold: number
 }
 
 // Valori predefiniti, gli stessi di plugin.json
@@ -32,6 +34,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showResumeCost: true,
   resumeAlertUsd: 0.5,
   showActivity: true,
+  guard: false,
+  guardThreshold: 95,
 }
 
 const PRESETS: readonly Preset[] = ['full', 'essential', 'minimal']
@@ -65,6 +69,9 @@ export const readSettings = (options: PluginOptions): Settings => {
         ? Math.max(options.resumeAlertUsd, 0)
         : DEFAULT_SETTINGS.resumeAlertUsd,
     showActivity: flag(options.showActivity),
+    // la guardia è l'unico interruttore spento di default
+    guard: options.guard === true,
+    guardThreshold: threshold(options.guardThreshold) ?? DEFAULT_SETTINGS.guardThreshold,
   }
 }
 

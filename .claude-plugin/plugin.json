@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "Barra sopra il prompt con % limite 5h, % limite settimanale e % contesto, colorate per soglia.",
   "author": { "name": "Maurizio Pelizzone" },
   "types": "./types/index.d.ts",
@@ -64,6 +64,20 @@
       "title": "usage-band: attività durante il turno",
       "description": "Terza riga durante un turno: strumento in corso, subagenti al lavoro, strumenti usati e avanzamento della lista di attività.",
       "default": true
+    },
+    "guard": {
+      "type": "boolean",
+      "title": "usage-band: guardia sui limiti",
+      "description": "Oltre la soglia della guardia del limite 5h o settimanale i subagenti (anche dei workflow) non partono; i prompt passano sempre.",
+      "default": false
+    },
+    "guardThreshold": {
+      "type": "number",
+      "title": "usage-band: soglia della guardia (%)",
+      "description": "Percentuale del limite 5h o settimanale da cui la guardia blocca i subagenti.",
+      "default": 95,
+      "min": 1,
+      "max": 100
     }
   }
 }
