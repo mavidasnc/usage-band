@@ -1636,10 +1636,23 @@ test(
 
 // Motore per i test del costo di ripresa: orologio, store (con i valori iniziali indicati) e cache di un'ora; il costo della
 // sessione cresce di `engine.stepCost` a ogni richiesta, che riporta 1000 token d'ingresso nuovi; il contesto è di `engine.tokens`.
-// Una richiesta il cui turnId è in `engine.gates` attende che il test risolva la sua promessa
-const stubResume = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], stored: Record<string, unknown> = {}) => {
+// Una richiesta il cui turnId è in `engine.gates` attende che il test risolva la sua promessa. Con `clockDrift` una lettura
+// dell'orologio è avanti di 0, 1 o 2 volte quei millisecondi, a giro: come dal vivo, dove due letture dello stesso tick non
+// coincidono e lo scarto fra loro cambia da un tick all'altro
+const stubResume = async (
+  $: Parameters<TestBody>[0],
+  on: Parameters<TestBody>[1],
+  stored: Record<string, unknown> = {},
+  clockDrift = 0,
+) => {
   const engine = { cost: 0, stepCost: 0.005, tokens: 100_000, gates: new Map<string, Promise<void>>() }
-  const clock = mock.clock(on, { now: 1_000_000 })
+  // Con lo scarto le attese restano del mock, mentre clock.now (che non si può registrare due volte) risponde da qui
+  const onWaits = (event: string, ...rest: unknown[]) => (event === 'clock.now' ? undefined : (on as (...args: unknown[]) => unknown)(event, ...rest))
+  const clock = mock.clock(clockDrift > 0 ? (onWaits as unknown as typeof on) : on, { now: 1_000_000 })
+  if (clockDrift > 0) {
+    let reads = 0
+    on('clock.now', () => ({ value: clock.now() + (reads++ % 3) * clockDrift }))
+  }
   mock.env(on, {})
   mock.store(on, stored)
   on('session.start', () => ({ cwd: '' }))
@@ -1697,7 +1710,16 @@ test("nel rosso arriva un avviso se la ripresa costa almeno la soglia, una volta
   expect(toasts).toHaveLength(1)
 })
 
-test('sotto la soglia di /config nessun avviso', { options: { resumeAlertUsd: 2 }, timeoutMs: 30000 }, async ($, on) => {
+test("l'avviso del costo di ripresa non si ripete se l'orologio avanza tra due letture", { timeoutMs: 30000 }, async ($, on) => {
+  const { clock, step, toasts } = await stubResume($, on, {}, 700)
+
+  await step()
+  await clock.advance(54 * 60_000 + 1_000)
+  await clock.advance(60_000)
+  expect(toasts).toHaveLength(1)
+})
+
+test('sotto la soglia di /config nessun avviso',{ options: { resumeAlertUsd: 2 }, timeoutMs: 30000 }, async ($, on) => {
   const { clock, step, toasts } = await stubResume($, on)
 
   await step()

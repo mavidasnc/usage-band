@@ -2,6 +2,11 @@
 
 Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
 
+## [1.2.1] - 2026-11-19
+
+### Corretto
+- L'avviso «Cache in scadenza» arriva una volta sola per richiesta. Prima poteva ripetersi più volte mentre la cache era nel rosso, sia come toast sia come notifica di Windows: il controllo "già avvisato" usava una scadenza ricalcolata dall'orologio a ogni secondo, arrotondata, che fra due letture poteva cambiare di un secondo. Ora la scadenza si ricava dall'ultima richiesta, e due aggiornamenti del countdown che partono insieme non lasciano più due timer in parallelo.
+
 ## [1.2.0] - 2026-11-05
 
 ### Aggiunto

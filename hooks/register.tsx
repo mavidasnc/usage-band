@@ -397,8 +397,9 @@ const transcriptResponseAt = async ($: EngineInterface, wait: boolean) => {
   return wait ? transcriptLoad.promise : (transcriptLoad.at ?? null)
 }
 
-// Stato corrente della cache: durata in uso e millisecondi residui (null prima della prima richiesta), oppure null se disattivata.
-// Senza una richiesta in questa sessione vale l'ultima risposta del transcript (conversazione ripresa); wait come per transcriptResponseAt
+// Stato corrente della cache: durata in uso, istante di scadenza e millisecondi residui (null prima della prima richiesta), oppure
+// null se disattivata. Senza una richiesta in questa sessione vale l'ultima risposta del transcript (conversazione ripresa);
+// wait come per transcriptResponseAt
 const cacheState = async ($: EngineInterface, wait = true) => {
   const ttl = envCacheTtl ?? '1h'
   if (ttl === 'off') {
@@ -406,9 +407,10 @@ const cacheState = async ($: EngineInterface, wait = true) => {
   }
   const ttlMs = CACHE_TTL_MS[ttl]
   const lastAt = (await read($, lastRequestAt)) ?? (await transcriptResponseAt($, wait).catch(() => null))
-  const remainingMs = lastAt === null ? null : Math.max(lastAt + ttlMs - (await $.clock.now()), 0)
+  const expiresAt = lastAt === null ? null : lastAt + ttlMs
+  const remainingMs = expiresAt === null ? null : Math.max(expiresAt - (await $.clock.now()), 0)
 
-  return { ttlMs, remainingMs }
+  return { ttlMs, expiresAt, remainingMs }
 }
 
 // Durata della cache dalle variabili di Claude Code: disattivata, forzata a 5 minuti o estesa a un'ora
@@ -432,8 +434,13 @@ const readEnvCacheTtl = async ($: EngineInterface): Promise<typeof envCacheTtl> 
 // Rapporto del prezzo di scrittura in cache per la durata in uso (5 minuti o un'ora)
 const writeRatio = () => CACHE_WRITE_RATIO[envCacheTtl === '5m' ? '5m' : '1h']
 
-// Scadenza della cache (al secondo) per cui l'avviso del costo di ripresa è già stato valutato: uno solo per richiesta
+// Scadenza della cache (istante esatto, dall'ultima richiesta) per cui l'avviso del costo di ripresa è già stato valutato:
+// uno solo per richiesta. Non si ricava dall'orologio, che fra due letture dello stesso tick avanza
 let resumeAlertedFor: number | null = null
+
+// Generazione dell'ultima chiamata di scheduleCacheTick: solo quella installa il timer, così due chiamate sovrapposte
+// (un tick e una richiesta) non lasciano due catene di tick in parallelo
+let cacheTickGeneration = 0
 
 // Testo del costo di una ripresa con il contesto e il modello indicati; null se manca il prezzo o il contesto
 const resumeLabel = (contextTokens: number | undefined, model: string | null) => {
@@ -442,14 +449,13 @@ const resumeLabel = (contextTokens: number | undefined, model: string | null) =>
 }
 
 // Cache appena entrata nel rosso: se una ripresa costerebbe almeno la soglia di /config, toast e notifica di sistema.
-// Una valutazione per scadenza: i tick successivi della stessa cache non rileggono il contesto
-const checkResumeAlert = async ($: EngineInterface, remainingMs: number) => {
+// Una valutazione per scadenza, segnata prima di ogni attesa: i tick successivi della stessa cache non rileggono il contesto
+const checkResumeAlert = async ($: EngineInterface, remainingMs: number, expiresAt: number) => {
   const { resumeAlertUsd, showResumeCost } = settings()
-  const expiry = Math.round(((await $.clock.now()) + remainingMs) / 1000)
-  if (!showResumeCost || resumeAlertUsd <= 0 || resumeAlertedFor === expiry) {
+  if (!showResumeCost || resumeAlertUsd <= 0 || resumeAlertedFor === expiresAt) {
     return
   }
-  resumeAlertedFor = expiry
+  resumeAlertedFor = expiresAt
   const usage = await $.session.usage().catch(() => null)
   const price = priceFor(await $.session.model().catch(() => null))
   const tokens = usage?.context.tokens
@@ -468,8 +474,13 @@ const checkResumeAlert = async ($: EngineInterface, remainingMs: number) => {
 const scheduleCacheTick = async ($: EngineInterface) => {
   cacheTimer?.cancel()
   cacheTimer = null
+  const generation = ++cacheTickGeneration
   try {
     const state = await cacheState($)
+    // Nel frattempo è partita un'altra chiamata: decide lei
+    if (generation !== cacheTickGeneration) {
+      return
+    }
     const remainingMs = state?.remainingMs ?? null
     const label = state === null ? null : remainingMs === null ? 'n/d' : cacheLabel(remainingMs)
     if (label !== lastCacheLabel) {
@@ -477,8 +488,8 @@ const scheduleCacheTick = async ($: EngineInterface) => {
       $.ui.invalidate('ui.render')
     }
     // Nel rosso (sotto il 10% della durata) e non ancora scaduta: avviso del costo di una ripresa, se alto
-    if (state && remainingMs !== null && remainingMs > 0 && remainingMs < state.ttlMs * 0.1) {
-      void checkResumeAlert($, remainingMs).catch(() => undefined)
+    if (state?.expiresAt != null && remainingMs !== null && remainingMs > 0 && remainingMs < state.ttlMs * 0.1) {
+      void checkResumeAlert($, remainingMs, state.expiresAt).catch(() => undefined)
     }
     if (remainingMs !== null && remainingMs > 0) {
       const unit = remainingMs > CACHE_SECONDS_FROM_MS ? 60_000 : 1000
